@@ -123,6 +123,10 @@ void Cplex::solve()
 // Compute the contour that a new node belongs to, and add it to the data structure
 void CbfsData::addNode(CbfsNodeData* nodeData)
 {
+	//Store diving candidate if diving is on
+	if (mDiveStatus)
+		mDiveCand.push_back(nodeData);
+
 	// Compute the contour for the node
 	switch (mMode)
 	{
@@ -130,11 +134,10 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 			nodeData->contour = mPosW * nodeData->numPos+ mNullW * nodeData->numNull;
 			break;
 		case LBContour:
-			double curLB = nodeData->lpval;
 			//Keep in mind, this is not the final version, yet. One improvement is to prune all contours with keys greater than 1
 			//if we have an incumbent solution, and not let new subproblem like that be added to contours.
 			//But this procedure can be done during branching callback and not here.
-			nodeData->contour = calContour(curLB);
+			nodeData->contour = calContour(nodeData->lpval);
 			break;
 	}
 
@@ -163,6 +166,13 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 
 void CbfsData::delNode(CbfsNodeData* nodeData)
 {
+	//If mDiveCand has elements, then first see if node to be deleted is in here.
+	if (!mDiveCand.empty())
+	{
+		if (nodeData->id == mDiveCand.front()->id) mDiveCand.pop_front();
+		else if (nodeData->id == mDiveCand.back()->id) mDiveCand.pop_back();
+		if (mDiveCand.size() > 2) throw ERROR << "More than 2 elements in mDiveCand.";
+	}
 	// Look up the node by the measure of best key
 	double search;
 	switch (mMob)
@@ -214,7 +224,19 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 NID CbfsData::getNextNode()
 {
 	NID id; id._id = -1;
-
+	if (!mDiveCand.empty())
+	{
+		id = mDiveCand.front()->id;
+		mDiveCand.clear();
+		mDiveCount++;
+		if (mDiveCount >= 500) mDiveStatus = false;     //If maximal depth of a dive is reached, then stop.
+		return id;
+	}
+	else
+	{
+		mDiveCount = 0;
+		mDiveStatus = true;
+	}
 	// Increment the iterator into the heap structure
 	++mCurrContour;
 	if (mCurrContour == mContours.end())

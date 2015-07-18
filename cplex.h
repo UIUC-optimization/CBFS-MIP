@@ -10,6 +10,7 @@
 #include "util.h"
 
 #include <map>
+#include <list>
 #include <utility>
 #include <ilcplex/ilocplex.h>
 #include <ilcplex/ilocplexi.h>
@@ -21,13 +22,15 @@ typedef IloCplex::MIPCallbackI::NodeId NID;
 typedef multimap<double, CbfsNodeData*> CbfsHeap;
 typedef map<int, CbfsHeap> ContourMap;
 typedef map<int, pair<int,int>> RangeMap;
+typedef list<CbfsNodeData*> CbfsDive;
 struct opts;
 
 class CbfsData
 {
 public:
 	CbfsData(Mode m, double posW, double nullW, int mob, int cPara) : 
-		mMode(m), mPosW(posW), mNullW(nullW), nIters(0), mCurrContour(mContours.begin()), mMob(mob), bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara)
+		mMode(m), mPosW(posW), mNullW(nullW), nIters(0), mCurrContour(mContours.begin()), mMob(mob),
+		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), diveCount(0), diveStatus(true)
 	{ }
 	~CbfsData();
 
@@ -57,7 +60,9 @@ private:
 
 	ContourMap mContours;
 	ContourMap::iterator mCurrContour;
-	int mMob, mcontPara, count;
+	CbfsDive mDiveCand;
+	int mMob, mcontPara, count, mDiveCount;
+	bool mDiveStatus;
 };
 
 class Cplex
