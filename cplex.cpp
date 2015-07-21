@@ -226,10 +226,23 @@ NID CbfsData::getNextNode()
 	NID id; id._id = -1;
 	if (!mDiveCand.empty())
 	{
+		if (mProbStep != 0 || (mDiveCount % 30 == 10 && mNullW == 2))  //Temp setup: when mNullW = 2, perform probing when diving
+			probStep();
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
-		mDiveCount++;
-		if (mDiveCount >= 500) mDiveStatus = false;     //If maximal depth of a dive is reached, then stop.
+		if (mProbStep != 2) mDiveCount++;               // Avoid an extra depth update when probing
+		if (mDiveCount >= 500) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
+		return id;
+	}
+	// This section is to handle empty successor list mid-probing
+	else if (mNullW == 2 && mProbStep != 0)
+	{
+		if (mProbStep == 1) mDiveCand = mProbPre;
+		else mDiveCand = mProbLeft;
+		id = mDiveCand.front()->id;
+		mDiveCand.clear();
+		mDiveCount++; mProbStep = 0;
+		if (mDiveCount >= 500) mDiveStatus = false;
 		return id;
 	}
 	else
@@ -380,8 +393,16 @@ CbfsNodeData::~CbfsNodeData()
 // all contour will be updated to accomodate new contPara.
 void CbfsData::updateBounds(double lb, double ub, double gap)
 {
+	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
 	bestLB = (bestLB < lb) ? lb : bestLB;
 	bestUB = (bestUB > ub) ? ub : bestUB;
+	double newGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
+	//Temp setup: when mPosW is set at 2, we update contours after big improvement of opt gap.
+	if (mPosW == 2)
+	{
+		if (oldGap > 1 && newGap < 1) updateContour();
+		else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
+	}
 	//if (ub != INFINITY)
 	//{
 	//	if (gap <= 0.01 && contPara != 2)
@@ -441,6 +462,31 @@ int CbfsData::calContour(double lb)
 		contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mcontPara)));
 	}
 	return contour;
+}
+
+// Main procedure of probing step: store the two parent node, explore both and compare results
+void CbfsData::probStep()
+{
+	if (mProbStep == 0 && mDiveCand.size() < 2) return;
+	switch (mProbStep)
+	{
+	    case 0:
+		    mProbPre = mDiveCand;
+			mProbPre.pop_front();
+		    mProbStep = 1;
+			break;
+		case 1:
+			mProbLeft = mDiveCand;
+			mDiveCand = mProbPre;
+			mProbStep = 2;
+			break;
+		case 2:
+			if (mProbLeft.front()->estimate <= mDiveCand.front()->estimate) mDiveCand = mProbLeft;
+			mProbStep = 0;
+			break;
+		default:
+			throw ERROR << "Invalid probing parameter.";
+	}
 }
 
 //Profile of the partial tree produced by the bnb algorithm, record number of nodes in each level

@@ -30,7 +30,7 @@ class CbfsData
 public:
 	CbfsData(Mode m, double posW, double nullW, int mob, int cPara) : 
 		mMode(m), mPosW(posW), mNullW(nullW), nIters(0), mCurrContour(mContours.begin()), mMob(mob),
-		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), diveCount(0), diveStatus(true)
+		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), mDiveCount(0), mDiveStatus(true), mProbStep(0)
 	{ }
 	~CbfsData();
 
@@ -41,6 +41,7 @@ public:
 	void updateProfile(int pb, int nb);
 	void estimateTree();
 	void checkTermi(double time);
+	void probStep();
 	int calContour(double lb);
 
 	NID getNextNode();
@@ -60,8 +61,8 @@ private:
 
 	ContourMap mContours;
 	ContourMap::iterator mCurrContour;
-	CbfsDive mDiveCand;
-	int mMob, mcontPara, count, mDiveCount;
+	CbfsDive mDiveCand, mProbLeft, mProbRight, mProbPre;
+	int mMob, mcontPara, count, mDiveCount, mProbStep;
 	bool mDiveStatus;
 };
 
