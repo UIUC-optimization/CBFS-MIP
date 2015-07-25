@@ -51,6 +51,7 @@ public:
 	long getNumIterations() { return nIters; }
 	void setNumIterations(long i) { nIters = i; }
 	void setTime(double time) { startTime = time; }
+	void updateContourBegin() { mCurrContour = mContours.begin(); }
 
 private:
 	Mode mMode;

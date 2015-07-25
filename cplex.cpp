@@ -24,7 +24,7 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 //	mCplex.setParam(IloCplex::NodeSel, 2);          // A best estimate node selection strategy
 //	mCplex.setParam(IloCplex::BBInterval, 0);       // Never select best bound when using best estimate strategy
 //	mCplex.setParam(IloCplex::VarSel, -1);			// Use the ''maximum infeasibility'' rule for variable selection
-	mCplex.setParam(IloCplex::RandomSeed, 20150624);// Set random seed
+//	mCplex.setParam(IloCplex::RandomSeed, 20150624);// Set random seed
 	if (disableAdvStart)
 	{
 		printf("Disabling advanced start methods and cut generation\n");
@@ -231,7 +231,7 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		if (mProbStep != 2) mDiveCount++;               // Avoid an extra depth update when probing
-		if (mDiveCount >= 500) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
+		if (mDiveCount >= 200) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
 		return id;
 	}
 	// This section is to handle empty successor list mid-probing
@@ -242,7 +242,7 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		mDiveCount++; mProbStep = 0;
-		if (mDiveCount >= 500) mDiveStatus = false;
+		if (mDiveCount >= 200) mDiveStatus = false;
 		return id;
 	}
 	else
@@ -298,6 +298,7 @@ void CbfsBranchCallback::main()
 	double bestObj = getBestObjValue();
 	double optGap = getMIPRelativeGap();
 	mCbfs->updateBounds(bestObj, incumVal, optGap);
+	if (1 == getNnodes()) mCbfs->updateContourBegin();
 
 	// Loop through all of the branches produced by CPLEX
 	for (int i = 0; i < getNbranches(); ++i)
@@ -455,7 +456,7 @@ int CbfsData::calContour(double lb)
 	int contour;
 	if (bestUB == INFINITY)
 	{
-		contour = (bestLB != 0) ? int(floor(fabs((lb - bestLB) / bestLB) * mcontPara)) : int(floor(fabs(lb)));
+		contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mcontPara)) : int(floor(fabs(lb)));
 	}
 	else
 	{
