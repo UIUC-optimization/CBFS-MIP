@@ -124,7 +124,7 @@ void Cplex::solve()
 void CbfsData::addNode(CbfsNodeData* nodeData)
 {
 	//Store diving candidate if diving is on
-	if (mDiveStatus)
+	if (mDiveStatus && mMode == LBContour)
 		mDiveCand.push_back(nodeData);
 
 	// Compute the contour for the node
@@ -231,7 +231,7 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		if (mProbStep != 2) mDiveCount++;               // Avoid an extra depth update when probing
-		if (mDiveCount >= 200) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
+		if (mDiveCount >= 100 * mPosW) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop. (temp setup: using mPosW)
 		return id;
 	}
 	// This section is to handle empty successor list mid-probing
@@ -242,7 +242,7 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		mDiveCount++; mProbStep = 0;
-		if (mDiveCount >= 200) mDiveStatus = false;
+		if (mDiveCount >= 100 * mPosW) mDiveStatus = false;
 		return id;
 	}
 	else
@@ -394,16 +394,16 @@ CbfsNodeData::~CbfsNodeData()
 // all contour will be updated to accomodate new contPara.
 void CbfsData::updateBounds(double lb, double ub, double gap)
 {
-	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
+//	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
 	bestLB = (bestLB < lb) ? lb : bestLB;
 	bestUB = (bestUB > ub) ? ub : bestUB;
-	double newGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
+//	double newGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
 	//Temp setup: when mPosW is set at 2, we update contours after big improvement of opt gap.
-	if (mPosW == 2)
-	{
-		if (oldGap > 1 && newGap < 1) updateContour();
-		else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
-	}
+//	if (mPosW == 2)
+//	{
+//		if (oldGap > 1 && newGap < 1) updateContour();
+//		else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
+//	}
 	//if (ub != INFINITY)
 	//{
 	//	if (gap <= 0.01 && contPara != 2)
