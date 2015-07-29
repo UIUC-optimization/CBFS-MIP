@@ -30,7 +30,8 @@ class CbfsData
 public:
 	CbfsData(Mode m, double posW, double nullW, int mob, int cPara) : 
 		mMode(m), mPosW(posW), mNullW(nullW), nIters(0), mCurrContour(mContours.begin()), mMob(mob),
-		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), mDiveCount(0), mDiveStatus(true), mProbStep(0), mDiveStart(0)
+		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), mDiveCount(0), mDiveStatus(true), mProbStep(0), 
+		mDiveStart(0), mMaxDepth(200)
 	{ }
 	~CbfsData();
 
@@ -63,7 +64,7 @@ private:
 	ContourMap mContours;
 	ContourMap::iterator mCurrContour;
 	CbfsDive mDiveCand, mProbLeft, mProbRight, mProbPre;
-	int mMob, mcontPara, count, mDiveCount, mProbStep, mTreeDepth, mDiveStart;
+	int mMob, mcontPara, count, mDiveCount, mProbStep, mTreeDepth, mDiveStart, mMaxDepth;
 	bool mDiveStatus;
 };
 

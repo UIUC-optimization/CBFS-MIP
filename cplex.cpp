@@ -231,7 +231,7 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		if (mProbStep != 2) mDiveCount++;               // Avoid an extra depth update when probing
-		if (mDiveCount >= 0.2*mTreeDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop. (temp setup: using mPosW)
+		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop. (temp setup: using mPosW)
 		if (mReOptGap < 0.005) mDiveStatus = false;     // Experimental: if opt gap is small, stop diving
 		return id;
 	}
@@ -253,12 +253,9 @@ NID CbfsData::getNextNode()
 		mDiveStatus = true;
 	}
 	// Increment the iterator into the heap structure
-	++mCurrContour; ++mDiveStart;
+	++mCurrContour;
 	if (mCurrContour == mContours.end())
-	{
 		mCurrContour = mContours.begin();
-		mDiveStart = 0;
-	}
 
 	// If the heap has a non-empty contour, return the best thing in that contour
 	// pointers to nodeData are stored in contour heap
@@ -275,6 +272,14 @@ NID CbfsData::getNextNode()
 		throw ERROR << "Node ID should not be -1!";
 	}
 
+	//The contour starting node of current dive belongs to. Get the corresponding max depth
+	if (bestUB != INFINITY)
+	{
+		mDiveStart = mCurrContour->second.begin()->second->contour;
+		mMaxDepth = 200 * double((mcontPara - mDiveStart) / mcontPara);
+	}
+//	printf("The max depth is: %d. \n", mMaxDepth);
+
 	return id;
 }
 
@@ -287,12 +292,28 @@ void CbfsBranchCallback::main()
 	// If there aren't any branches, just prune and return
 	if (getNbranches() == 0)
 	{
+		if (mJsonFile)
+		{
+			fprintf(mJsonFile, "{\"node_id\": %lld, \"is_int_feas\": ", getNodeId()._id);
+			if (isIntegerFeasible()) fprintf(mJsonFile, "true, ");
+			else fprintf(mJsonFile, "false, ");
+			fprintf(mJsonFile, "\"upper_bound\": %0.2f}\n", getObjValue());
+		}
 		prune();
 		return;
 	}
 
 	// myNodeData will be valid except at the root of the search
 	CbfsNodeData* myNodeData = (CbfsNodeData*)getNodeData();
+	if (mJsonFile)
+	{
+		double incumbentVal = INFINITY;
+		if (hasIncumbent()) incumbentVal = getIncumbentObjValue();
+		fprintf(mJsonFile, "{\"node_id\": %lld, \"explored_at\": %ld, \"lower_bound\": %0.2f, "
+			"\"upper_bound\": %0.2f, ", getNodeId()._id, getNnodes(), getObjValue(), incumbentVal);
+		if (!myNodeData)
+			fprintf(mJsonFile, "\"contour\": 0, ");
+	}
 
 	//Set starting time of estimation period
 	//if (!myNodeData)
@@ -319,6 +340,8 @@ void CbfsBranchCallback::main()
 		int varId = vars[0].getId();
 
 		// Output
+		if (i == 0 && mJsonFile)
+			fprintf(mJsonFile, "\"branching_var\": \"%s\"}\n", vars[0].getName());
 
 		// Populate the CbfsNodeData structure corresponding to the new branch
 		CbfsNodeData* newNodeData;
@@ -366,6 +389,12 @@ void CbfsBranchCallback::main()
 		else newNodeData->contour = -1;
 
 		// Output
+		if (mJsonFile)
+		{
+			fprintf(mJsonFile, "{\"node_id\": %lld, \"child\": %lld, \"branch_dir\": %d, "
+				"\"estimate\": %0.2f, \"contour\": %d}\n", getNodeId()._id, newNodeData->id._id,
+				dirs[0], newNodeData->estimate, newNodeData->contour);
+		}
 	}
 
 	//Check if ready for estimation
@@ -393,6 +422,11 @@ CbfsNodeData::~CbfsNodeData()
 		mCbfs->delNode(this);
 
 	// If the node hasn't been explored yet, mark it as pruned in the JSON file
+	if (mJsonFile && !explored)
+	{
+		fprintf(mJsonFile, "{\"node_id\": %lld, \"pruned_at\": %ld, \"lower_bound\": %0.2f, "
+			"\"upper_bound\": %0.2f}\n", id._id, mCbfs->getNumIterations(), lpval, incumbent);
+	}
 }
 
 // Update lower and upper bound, as well as contPara. The first time contPara changes,
