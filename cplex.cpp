@@ -124,7 +124,7 @@ void Cplex::solve()
 void CbfsData::addNode(CbfsNodeData* nodeData)
 {
 	//Store diving candidate if diving is on
-	if (mDiveStatus && mMode == LBContour)
+	if (mDiveStatus)
 		mDiveCand.push_back(nodeData);
 
 	// Compute the contour for the node
@@ -231,7 +231,8 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		if (mProbStep != 2) mDiveCount++;               // Avoid an extra depth update when probing
-		if (mDiveCount >= 100 * mPosW) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop. (temp setup: using mPosW)
+		if (mDiveCount >= 0.2*mTreeDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop. (temp setup: using mPosW)
+		if (mReOptGap < 0.005) mDiveStatus = false;     // Experimental: if opt gap is small, stop diving
 		return id;
 	}
 	// This section is to handle empty successor list mid-probing
@@ -242,7 +243,8 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		mDiveCount++; mProbStep = 0;
-		if (mDiveCount >= 100 * mPosW) mDiveStatus = false;
+		if (mDiveCount >= 0.2*mTreeDepth) mDiveStatus = false;
+		if (mReOptGap < 0.005) mDiveStatus = false;
 		return id;
 	}
 	else
@@ -251,9 +253,12 @@ NID CbfsData::getNextNode()
 		mDiveStatus = true;
 	}
 	// Increment the iterator into the heap structure
-	++mCurrContour;
+	++mCurrContour; ++mDiveStart;
 	if (mCurrContour == mContours.end())
+	{
 		mCurrContour = mContours.begin();
+		mDiveStart = 0;
+	}
 
 	// If the heap has a non-empty contour, return the best thing in that contour
 	// pointers to nodeData are stored in contour heap
@@ -397,6 +402,7 @@ void CbfsData::updateBounds(double lb, double ub, double gap)
 //	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
 	bestLB = (bestLB < lb) ? lb : bestLB;
 	bestUB = (bestUB > ub) ? ub : bestUB;
+	mReOptGap = gap;
 //	double newGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
 	//Temp setup: when mPosW is set at 2, we update contours after big improvement of opt gap.
 //	if (mPosW == 2)
@@ -404,29 +410,6 @@ void CbfsData::updateBounds(double lb, double ub, double gap)
 //		if (oldGap > 1 && newGap < 1) updateContour();
 //		else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
 //	}
-	//if (ub != INFINITY)
-	//{
-	//	if (gap <= 0.01 && contPara != 2)
-	//	{
-	//		contPara = 2;
-	//		updateContour();
-	//	}
-	//	if (gap <= 0.05 && gap > 0.01 && contPara != 5)
-	//	{
-	//		contPara = 5;
-	//		updateContour();
-	//	}
-	//	if (gap <= 0.1 && gap > 0.05 && contPara != 10)
-	//	{
-	//		contPara = 10;
-	//		updateContour();
-	//	}
-	//	if (gap <= 0.2 && gap > 0.1 && contPara != 25)
-	//	{
-	//		contPara = 25;
-	//		updateContour();
-	//	}
-	//}
 }
 
 // Contour update function. *This is not very efficient, but we should be fine for the moment because
@@ -456,6 +439,7 @@ int CbfsData::calContour(double lb)
 	int contour;
 	if (bestUB == INFINITY)
 	{
+		// The labeling function here could lead to extremely large contour numbers that might be a problem.
 		contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mcontPara)) : int(floor(fabs(lb)));
 	}
 	else
@@ -491,12 +475,13 @@ void CbfsData::probStep()
 }
 
 //Profile of the partial tree produced by the bnb algorithm, record number of nodes in each level
+//Just update depth of tree
 void CbfsData::updateProfile(int pb, int nb)
 {
-	int level = pb + nb;
-	if (treeProfile.size() < level)
-		treeProfile.resize(level);
-	treeProfile[level - 1]++;
+	mTreeDepth = max(mTreeDepth, pb + nb);
+//	if (treeProfile.size() < level)
+//		treeProfile.resize(level);
+//	treeProfile[level - 1]++;
 }
 
 //Produce the estimate tree size with existing partial tree
