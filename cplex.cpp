@@ -17,14 +17,14 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 	cbfs->setSense(mObj.getSense()); //To specify whether the invoking objective is a maximization (Maximize) or minimization
 
 	// Set CPLEX parameters
-//	mCplex.setParam(IloCplex::MIPSearch, 1);		// Disable dynamic search for non-callback version
+	mCplex.setParam(IloCplex::MIPSearch, 1);		// Disable dynamic search for non-callback version
 	mCplex.setParam(IloCplex::Threads, 1);			// Limit to 1 thread for all versions
 	mCplex.setParam(IloCplex::TiLim, timelimit);	// 1 hour time limit
 	mCplex.setParam(IloCplex::NodeFileInd, 0);		// Callbacks won't work with compressed node files
 //	mCplex.setParam(IloCplex::NodeSel, 2);          // A best estimate node selection strategy
 //	mCplex.setParam(IloCplex::BBInterval, 0);       // Never select best bound when using best estimate strategy
 //	mCplex.setParam(IloCplex::VarSel, -1);			// Use the ''maximum infeasibility'' rule for variable selection
-//	mCplex.setParam(IloCplex::RandomSeed, 20150624);// Set random seed
+	mCplex.setParam(IloCplex::RandomSeed, 20150624);// Set random seed
 	if (disableAdvStart)
 	{
 		printf("Disabling advanced start methods and cut generation\n");
@@ -226,17 +226,17 @@ NID CbfsData::getNextNode()
 	NID id; id._id = -1;
 	if (!mDiveCand.empty())
 	{
-		if (mProbStep != 0 || (mDiveCount % 30 == 10 && mNullW == 2))  //Temp setup: when mNullW = 2, perform probing when diving
+		if (mProbStep != 0 || (mDiveCount % 30 == 10 && mNullW == 5))  //Temp setup: when mNullW = 2, perform probing when diving
 			probStep();
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
-		if (mProbStep != 2) mDiveCount++;               // Avoid an extra depth update when probing
-		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop. (temp setup: using mPosW)
-		if (mReOptGap < 0.005) mDiveStatus = false;     // Experimental: if opt gap is small, stop diving
+		if (mProbStep != 2) mDiveCount++;                     // Avoid an extra depth update when probing
+		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
+//		if (mReOptGap < 0.005) mDiveStatus = false;           // Experimental: if opt gap is small, stop diving
 		return id;
 	}
 	// This section is to handle empty successor list mid-probing
-	else if (mNullW == 2 && mProbStep != 0)
+	else if (mNullW == 5 && mProbStep != 0)
 	{
 		if (mProbStep == 1) mDiveCand = mProbPre;
 		else mDiveCand = mProbLeft;
@@ -244,7 +244,7 @@ NID CbfsData::getNextNode()
 		mDiveCand.clear();
 		mDiveCount++; mProbStep = 0;
 		if (mDiveCount >= 0.2*mTreeDepth) mDiveStatus = false;
-		if (mReOptGap < 0.005) mDiveStatus = false;
+//		if (mReOptGap < 0.005) mDiveStatus = false;
 		return id;
 	}
 	else
@@ -273,11 +273,11 @@ NID CbfsData::getNextNode()
 	}
 
 	//The contour starting node of current dive belongs to. Get the corresponding max depth
-	if (bestUB != INFINITY)
-	{
-		mDiveStart = mCurrContour->second.begin()->second->contour;
-		mMaxDepth = 200 * double((mcontPara - mDiveStart) / mcontPara);
-	}
+//	if (bestUB != INFINITY)
+//	{
+//		mDiveStart = mCurrContour->second.begin()->second->contour;
+//		mMaxDepth = 200 * double((mcontPara - mDiveStart) / mcontPara);
+//	}
 //	printf("The max depth is: %d. \n", mMaxDepth);
 
 	return id;
@@ -479,6 +479,17 @@ int CbfsData::calContour(double lb)
 	else
 	{
 		contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mcontPara)));
+		//If mcontPara is 5, then lb below 0.5 will be contour 0, lb between (0.5,0.7) will be 1, 0.1 each for 2, 3, 4.
+		if (mcontPara == 5)
+		{
+			int percent;
+			percent = fabs((lb - bestLB) / (bestUB - bestLB));
+			if (percent < 0.5) contour == 0;
+			else if (percent < 0.7) contour == 1;
+			else if (percent < 0.8) contour == 2;
+			else if (percent < 0.9) contour == 3;
+			else contour == 4;
+		}
 	}
 	return contour;
 }
