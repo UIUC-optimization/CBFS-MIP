@@ -5,7 +5,7 @@
 
 // Import the model and set up the CPLEX solver
 Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit, 
-		bool disableAdvStart) :
+		bool disableAdvStart, int rand) :
 	mModel(mEnv),    //Initialize model
 	mCplex(mEnv),    //Initialize algorithm(These two require enverioment instance mEnv to initialize)
 	mJsonFile(jsonFile)
@@ -24,7 +24,8 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 //	mCplex.setParam(IloCplex::NodeSel, 2);          // A best estimate node selection strategy
 //	mCplex.setParam(IloCplex::BBInterval, 0);       // Never select best bound when using best estimate strategy
 //	mCplex.setParam(IloCplex::VarSel, -1);			// Use the ''maximum infeasibility'' rule for variable selection
-	mCplex.setParam(IloCplex::RandomSeed, 20150624);// Set random seed
+	if (rand > 1000)
+	    mCplex.setParam(IloCplex::RandomSeed, rand);// Set random seed
 	if (disableAdvStart)
 	{
 		printf("Disabling advanced start methods and cut generation\n");
@@ -39,6 +40,11 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 		mCplex.use(new (mEnv) CbfsBranchCallback(mEnv, cbfs, mJsonFile));  //IloCplex::BranchCallbackI::CbfsBranchCallback
 		mCplex.use(new (mEnv) CbfsNodeCallback(mEnv, cbfs));               //IloCplex::NodeCallbackI::CbfsNodeCallback
 	}
+
+	/*Test region start: count variables*/
+	cbfs->getIntVarArray(getIntVars());
+	cbfs->getCountIntVar(countIntVars);
+	/*Test region end: count variables*/
 }
 
 // Use CPLEX to solve the problem
@@ -120,6 +126,48 @@ void Cplex::solve()
 
 }
 
+//Attempt to extract integer variables from CPLEX model
+IloNumVarArray Cplex::getIntVars() {
+	IloModel::Iterator iter(mModel);// = mModelIterator(mModel);
+	unordered_set<int> vars;
+	IloNumVarArray allVars(mEnv);
+	int count = 0;
+	IloExpr expr;
+	IloExpr::LinearIterator iter2;
+	while (iter.ok()) {
+		IloExtractable extr = *iter;
+		if (extr.isVariable()) {
+			IloNumVar temp = extr.asVariable();
+			if (temp.getType() != 2) {
+				vars.insert(temp.getId());
+				if (vars.size() > count) {
+					allVars.add(temp);
+					count++;
+				}
+				//printf("Variable detected. %d\n", count);
+			}
+		} 
+		//else if (extr.isNumExpr() || extr.isIntExpr() || extr.isObjective()) {
+		//	expr = IloExpr(extr.asNumExpr());
+		//	iter2 = expr.getLinearIterator();
+		//	while (iter2.ok()) {
+		//		IloNumVar temp = iter2.getVar();
+		//		vars.insert(&temp);
+		//		if (vars.size() > count) {
+		//			allVars.add(temp);
+		//			count++;
+		//		}
+		//		printf("Expression detected.%d\n", count);
+		//		++iter2;
+		//	}
+		//}
+		++iter;
+	}
+	printf("Count %d variables in total.\n", count);
+	countIntVars = count;
+	return allVars;
+}
+
 // Compute the contour that a new node belongs to, and add it to the data structure
 void CbfsData::addNode(CbfsNodeData* nodeData)
 {
@@ -128,18 +176,7 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 		mDiveCand.push_back(nodeData);
 
 	// Compute the contour for the node
-	switch (mMode)
-	{
-		case Weighted:
-			nodeData->contour = mPosW * nodeData->numPos+ mNullW * nodeData->numNull;
-			break;
-		case LBContour:
-			//Keep in mind, this is not the final version, yet. One improvement is to prune all contours with keys greater than 1
-			//if we have an incumbent solution, and not let new subproblem like that be added to contours.
-			//But this procedure can be done during branching callback and not here.
-			nodeData->contour = calContour(nodeData->lpval);
-			break;
-	}
+	nodeData->contour = calContour(nodeData);
 
 	// TODO - should we use estimate or lower bound here?  I think estimate's the right thing, but
 	// I'm not 100% sure of this.  We should try the other as well
@@ -247,7 +284,7 @@ NID CbfsData::getNextNode()
 //		if (mReOptGap < 0.005) mDiveStatus = false;
 		return id;
 	}
-	else
+	else if (mMaxDepth > 0)
 	{
 		mDiveCount = 0;
 		mDiveStatus = true;
@@ -272,7 +309,7 @@ NID CbfsData::getNextNode()
 		throw ERROR << "Node ID should not be -1!";
 	}
 
-	//The contour starting node of current dive belongs to. Get the corresponding max depth
+	//The contour that the starting node of current dive belongs to. Get the corresponding max depth
 //	if (bestUB != INFINITY)
 //	{
 //		mDiveStart = mCurrContour->second.begin()->second->contour;
@@ -315,16 +352,19 @@ void CbfsBranchCallback::main()
 			fprintf(mJsonFile, "\"contour\": 0, ");
 	}
 
-	//Set starting time of estimation period
-	//if (!myNodeData)
-	//	mCbfs->setTime(getCplexTime());
-
 	// Update lower bound and upper bound, and update contour if necessary
 	double incumVal = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
 	double bestObj = getBestObjValue();
 	double optGap = getMIPRelativeGap();
 	mCbfs->updateBounds(bestObj, incumVal, optGap);
 	if (1 == getNnodes()) mCbfs->updateContourBegin();
+
+	/* Feasibility test: start */
+	IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> varFeasible(mEnv);
+	getFeasibilities(varFeasible, mCbfs->mAllIntVars);
+	int countInfeasible = returnIntVarArray(varFeasible);
+	//printf("!!!array size is %d!!!\n", countInfeasible);
+	/* Feasibility test: end */
 
 	// Loop through all of the branches produced by CPLEX
 	for (int i = 0; i < getNbranches(); ++i)
@@ -356,6 +396,7 @@ void CbfsBranchCallback::main()
 		newNodeData->lpval = getObjValue();
 		newNodeData->incumbent = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
 		newNodeData->parent = getNodeId()._id;
+		newNodeData->numInfeasibles = countInfeasible;
 		newNodeData->depth++;
 
 		// Compute the values of the new bounds for the variable we're branching on
@@ -377,9 +418,6 @@ void CbfsBranchCallback::main()
 			else rmap[varId] = make_pair(oldLB, bounds[0]);
 		}
 
-		//Update the tree profile
-		//mCbfs->updateProfile(newNodeData->numPos, newNodeData->numNull);
-
 		// Tell CPLEX to create the branch and return the id of the new node
 		newNodeData->id = makeBranch(vars, bounds, dirs, estimate, newNodeData);
 
@@ -397,11 +435,19 @@ void CbfsBranchCallback::main()
 		}
 	}
 
-	//Check if ready for estimation
-	//mCbfs->checkTermi(getCplexTime());
-
 	// Mark this node as explored so we don't print output when it gets deleted
 	if (myNodeData) myNodeData->explored = true;
+}
+
+// Return the number of infeasible variables for current node
+int CbfsBranchCallback::returnIntVarArray(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars) {
+	int K = isIntVars.getSize();
+	int count = 0;
+	for (int i = 0; i < K; i++) {
+		if (isIntVars[i] == CPX_INTEGER_INFEASIBLE)
+			count++;
+	}
+	return count;
 }
 
 // Select a new node to branch on according to the CBFS rule
@@ -429,8 +475,7 @@ CbfsNodeData::~CbfsNodeData()
 	}
 }
 
-// Update lower and upper bound, as well as contPara. The first time contPara changes,
-// all contour will be updated to accomodate new contPara.
+// Update lower and upper bound
 void CbfsData::updateBounds(double lb, double ub, double gap)
 {
 //	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
@@ -448,48 +493,67 @@ void CbfsData::updateBounds(double lb, double ub, double gap)
 
 // Contour update function. *This is not very efficient, but we should be fine for the moment because
 // it will only be called at most 4 times.
-void CbfsData::updateContour()
-{
-	ContourMap tempContours;
-	int contour;
+//void CbfsData::updateContour()
+//{
+//	ContourMap tempContours;
+//	int contour;
+//
+//	//Go through all nodes in existing contours and determine their new contour
+//	for (ContourMap::iterator i = mContours.begin(); i != mContours.end(); i++)
+//	{
+//		for (CbfsHeap::iterator j = ((*i).second).begin(); j != ((*i).second).end(); j++)
+//		{
+//			contour = calContour((*j).second->lpval);
+//			((*j).second)->contour = contour;
+//			tempContours[contour].insert({ (*j).first, (*j).second });
+//		}
+//	}
+//	mContours.clear();
+//	mContours = tempContours;
+//	mCurrContour = mContours.begin();
+//}
 
-	//Go through all nodes in existing contours and determine their new contour
-	for (ContourMap::iterator i = mContours.begin(); i != mContours.end(); i++)
-	{
-		for (CbfsHeap::iterator j = ((*i).second).begin(); j != ((*i).second).end(); j++)
-		{
-			contour = calContour((*j).second->lpval);
-			((*j).second)->contour = contour;
-			tempContours[contour].insert({ (*j).first, (*j).second });
-		}
-	}
-	mContours.clear();
-	mContours = tempContours;
-	mCurrContour = mContours.begin();
-}
-
-int CbfsData::calContour(double lb)
+int CbfsData::calContour(CbfsNodeData* nodeData)
 {
 	int contour;
-	if (bestUB == INFINITY)
-	{
-		// The labeling function here could lead to extremely large contour numbers that might be a problem.
-		contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mcontPara)) : int(floor(fabs(lb)));
-	}
-	else
-	{
-		contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mcontPara)));
-		//If mcontPara is 5, then lb below 0.5 will be contour 0, lb between (0.5,0.7) will be 1, 0.1 each for 2, 3, 4.
-		if (mcontPara == 5)
+	int lb = nodeData->lpval;
+	switch (mMode) {
+	case Weighted:
+		contour = mPosW * nodeData->numPos + mNullW * nodeData->numNull;
+		break;
+	case LBContour:
+		if (bestUB == INFINITY)
 		{
-			int percent;
-			percent = fabs((lb - bestLB) / (bestUB - bestLB));
-			if (percent < 0.5) contour == 0;
-			else if (percent < 0.7) contour == 1;
-			else if (percent < 0.8) contour == 2;
-			else if (percent < 0.9) contour == 3;
-			else contour == 4;
+			// The labeling function here could lead to extremely large contour numbers that might be a problem.
+			contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mcontPara)) : int(floor(fabs(lb)));
 		}
+		else
+		{
+			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mcontPara)));
+			//If mcontPara is 5, then lb below 0.5 will be contour 0, lb between (0.5,0.7) will be 1, 0.1 each for 2, 3, 4.
+			if (mcontPara == 5)
+			{
+				int percent;
+				percent = fabs((lb - bestLB) / (bestUB - bestLB));
+				if (percent < 0.5) contour == 0;
+				else if (percent < 0.7) contour == 1;
+				else if (percent < 0.8) contour == 2;
+				else if (percent < 0.9) contour == 3;
+				else contour == 4;
+			}
+		}
+		break;
+	case NInfeasible:
+		//printf("Number of infeasible variables: %d.\n", nodeData->numInfeasibles);
+		//contour = mNIntVars - nodeData->numInfeasibles;
+		//double def = double(mNIntVars - nodeData->numInfeasibles) / (double)(mNIntVars);
+		//if (def <= 0.5) contour = 0;
+		//else {
+		//	def = (def - 0.5) / 0.5;
+		//	contour = floor(def * mNInfeasibleCont + 1);
+		//}
+		contour = double(mNIntVars - nodeData->numInfeasibles) / (double)(mNIntVars) * 10;
+		//printf("In contour: %d.\n", contour);
 	}
 	return contour;
 }
@@ -516,79 +580,5 @@ void CbfsData::probStep()
 			break;
 		default:
 			throw ERROR << "Invalid probing parameter.";
-	}
-}
-
-//Profile of the partial tree produced by the bnb algorithm, record number of nodes in each level
-//Just update depth of tree
-void CbfsData::updateProfile(int pb, int nb)
-{
-	mTreeDepth = max(mTreeDepth, pb + nb);
-//	if (treeProfile.size() < level)
-//		treeProfile.resize(level);
-//	treeProfile[level - 1]++;
-}
-
-//Produce the estimate tree size with existing partial tree
-void CbfsData::estimateTree()
-{
-	int dT, bT;
-	int lT = 0;
-	int waistMin, waistMax;
-	int waistVal = -1;
-
-	dT = treeProfile.size() + 1;
-	for (int ind = 0; ind < dT - 2; ind++)
-	{
-		if (lT == 0 && (treeProfile[ind + 1] / treeProfile[ind]) < 2)
-			lT = ind + 1;
-		if (waistVal < treeProfile[ind])
-		{
-			waistMin = ind;
-			waistMax = ind;
-			waistVal = treeProfile[ind];
-		}
-		else if (waistVal == treeProfile[ind])
-		{
-			waistMax = ind;
-		}
-	}
-	bT = ceil((waistMin + waistMax) / 2.0);
-
-	vector<double> lambdaSeq;
-	for (int ind = 0; ind <= dT; ind++)
-	{
-		if (ind <= lT - 1)
-			lambdaSeq.push_back(2);
-		else if (ind >= lT && ind <= bT - 1)
-			lambdaSeq.push_back(2 - (ind - lT + 1) / (bT - lT + 1));
-		else
-			lambdaSeq.push_back(1 - (ind - bT + 1) / (dT - bT + 1));
-	}
-
-	double estSum = 1;
-	for (int i = 1; i <= dT; i++)
-	{
-		double estMulti = 1;
-		for (int j = 0; j < i; j++)
-			estMulti = estMulti * lambdaSeq[j];
-		estSum += estMulti;
-	}
-
-	printf("Estimate tree size: %0.2f\n", estSum);
-}
-
-void CbfsData::checkTermi(double time)
-{
-	if (time - startTime > 5 && count != 1)
-	{
-		int treeSize = 1;
-		for (int ind = 0; ind < treeProfile.size(); ind++)
-			treeSize += treeProfile[ind];
-		if (treeSize / treeProfile.size() >= 20)
-		{
-			estimateTree();
-			count = 1;
-		}
 	}
 }

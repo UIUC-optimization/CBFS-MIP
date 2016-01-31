@@ -10,6 +10,7 @@
 #include "util.h"
 
 #include <map>
+#include <unordered_set>
 #include <list>
 #include <utility>
 #include <ilcplex/ilocplex.h>
@@ -28,22 +29,22 @@ struct opts;
 class CbfsData
 {
 public:
-	CbfsData(Mode m, double posW, double nullW, int mob, int cPara) : 
+	CbfsData(Mode m, double posW, double nullW, int mob, int cPara, int maxDepth) : 
 		mMode(m), mPosW(posW), mNullW(nullW), nIters(0), mCurrContour(mContours.begin()), mMob(mob),
-		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), mDiveCount(0), mDiveStatus(true), mProbStep(0), 
-		mDiveStart(0), mMaxDepth(200)
-	{ }
+		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), mDiveCount(0), mProbStep(0), 
+		mDiveStart(0), mMaxDepth(maxDepth)
+	{
+		mDiveStatus = (maxDepth > 0) ? true : false;
+		mNInfeasibleCont = 20;
+	}
 	~CbfsData();
 
 	void addNode(CbfsNodeData* nodeData);
 	void delNode(CbfsNodeData* nodeData);
 	void updateContour();
 	void updateBounds(double lb, double ub, double gap);
-	void updateProfile(int pb, int nb);
-	void estimateTree();
-	void checkTermi(double time);
 	void probStep();
-	int calContour(double lb);
+	int calContour(CbfsNodeData* nodeData);
 
 	NID getNextNode();
 
@@ -51,20 +52,23 @@ public:
 	void setSense(IloObjective::Sense s) { mSense = s; }
 	long getNumIterations() { return nIters; }
 	void setNumIterations(long i) { nIters = i; }
-	void setTime(double time) { startTime = time; }
 	void updateContourBegin() { mCurrContour = mContours.begin(); }
+	void getIntVarArray(IloNumVarArray input) { mAllIntVars = input.toIntVarArray(); }
+	void getCountIntVar(int input) { mNIntVars = input; }
+
+	IloIntVarArray mAllIntVars;   //Array for all (int) variables, I will let this exposed for now.
 
 private:
 	Mode mMode;
 	IloObjective::Sense mSense;
-	double mPosW, mNullW, bestLB, bestUB, startTime, mReOptGap;
+	double mPosW, mNullW, bestLB, bestUB, mReOptGap;
 	long nIters;
-	vector<int> treeProfile;
 
 	ContourMap mContours;
 	ContourMap::iterator mCurrContour;
 	CbfsDive mDiveCand, mProbLeft, mProbRight, mProbPre;
 	int mMob, mcontPara, count, mDiveCount, mProbStep, mTreeDepth, mDiveStart, mMaxDepth;
+	int mNIntVars, mNInfeasibleCont;
 	bool mDiveStatus;
 };
 
@@ -72,10 +76,11 @@ class Cplex
 {
 public:
 	Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit, 
-			bool disableAdvStart);
+			bool disableAdvStart, int rand);
 
 	void solve();
 	IloObjective::Sense getSense() { return mObj.getSense(); }
+	IloNumVarArray getIntVars();
 
 private:
 	IloEnv mEnv;
@@ -84,6 +89,7 @@ private:
 	IloObjective mObj;
 
 	FILE* mJsonFile;
+	int countIntVars;
 
 };
 
@@ -91,12 +97,14 @@ class CbfsBranchCallback : public IloCplex::BranchCallbackI
 {
 public:
 	CbfsBranchCallback(IloEnv env, CbfsData* cbfs, FILE* jsonFile) : 
-		IloCplex::BranchCallbackI(env), mCbfs(cbfs), mJsonFile(jsonFile) { }
+		IloCplex::BranchCallbackI(env), mCbfs(cbfs), mJsonFile(jsonFile), mEnv(env) { }
 	IloCplex::CallbackI* duplicateCallback() const 
 		{ return (new (getEnv()) CbfsBranchCallback(*this)); }
 	void main();
+	int returnIntVarArray(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars);
 
 private:
+	IloEnv mEnv;
 	CbfsData* mCbfs;
 	FILE* mJsonFile;
 };
@@ -117,7 +125,7 @@ private:
 class CbfsNodeData : public IloCplex::MIPCallbackI::NodeData
 {
 public:
-	int depth, numPos, numNull;
+	int depth, numPos, numNull, numInfeasibles;
 
 	int contour;
 	NID id;

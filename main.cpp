@@ -26,8 +26,8 @@ int main(int argc, char* argv[])
 				" for writing";
 		}
 
-		CbfsData* cbfs = new CbfsData(options.m, options.posW, options.nullW, options.mob, options.cPara);
-		Cplex cplex(infile, jsonFile, cbfs, options.timelimit, options.disableAdvStart);
+		CbfsData* cbfs = new CbfsData(options.m, options.posW, options.nullW, options.mob, options.cPara, options.maxDepth);
+		Cplex cplex(infile, jsonFile, cbfs, options.timelimit, options.disableAdvStart, options.randSeed);
 		cplex.solve();
 
 		if (jsonFile)
@@ -48,6 +48,8 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 	options.timelimit = 3600;
 	options.mob = 3;
 	options.cPara = 50;
+	options.maxDepth = -1;
+	options.randSeed = 0;
 
 	int len = sizeof(optStrings)/(3 * sizeof(char*));
 	int numOpts = 0;
@@ -88,10 +90,18 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 		case 'l':
 			options.cPara = atoi(optarg);
 			break;
+		case 'n':
+			options.m = NInfeasible;
+			break;
+		case 'd':
+			options.maxDepth = atoi(optarg);
+			break;
+		case 'r':
+			options.randSeed = atoi(optarg);
+			break;
 		case 't':
 			options.timelimit = atoi(optarg);
 			break;
-
 		case 'M':
 			options.mob = atoi(optarg);
 			break;
@@ -101,7 +111,6 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 		case 'N':
 			options.nullW = atof(optarg);
 			break;
-
 		case 'j':
 			options.json_filename = optarg;
 			break;
