@@ -36,6 +36,7 @@ public:
 	{
 		mDiveStatus = (maxDepth > 0) ? true : false;
 		mNInfeasibleCont = 20;
+		srand(time(0));
 	}
 	~CbfsData();
 

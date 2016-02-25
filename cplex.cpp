@@ -309,14 +309,6 @@ NID CbfsData::getNextNode()
 		throw ERROR << "Node ID should not be -1!";
 	}
 
-	//The contour that the starting node of current dive belongs to. Get the corresponding max depth
-//	if (bestUB != INFINITY)
-//	{
-//		mDiveStart = mCurrContour->second.begin()->second->contour;
-//		mMaxDepth = 200 * double((mcontPara - mDiveStart) / mcontPara);
-//	}
-//	printf("The max depth is: %d. \n", mMaxDepth);
-
 	return id;
 }
 
@@ -543,7 +535,7 @@ int CbfsData::calContour(CbfsNodeData* nodeData)
 			}
 		}
 		break;
-	case NInfeasible:
+	case NInfCont:
 		//printf("Number of infeasible variables: %d.\n", nodeData->numInfeasibles);
 		//contour = mNIntVars - nodeData->numInfeasibles;
 		//double def = double(mNIntVars - nodeData->numInfeasibles) / (double)(mNIntVars);
@@ -554,6 +546,9 @@ int CbfsData::calContour(CbfsNodeData* nodeData)
 		//}
 		contour = double(mNIntVars - nodeData->numInfeasibles) / (double)(mNIntVars) * 10;
 		//printf("In contour: %d.\n", contour);
+		break;
+	case RandCont:
+		contour = rand() % 5;
 	}
 	return contour;
 }

@@ -50,6 +50,7 @@ static const char* optStrings[][3] =
 	{BOOL, "b", "Use no contours (BFS)"},
 	{BOOL, "w", "Use weighted contour rule (default pw = 1, nw = 1)"},
 	{BOOL, "W", "Disable warm starts and cut generation"},
+	{BOOL, "R", "Use random contour." },
 	{ARG, "d", "Use diving heuristic, set maximum diving depth"},
 	{ARG, "r", "Set random seed for CPLEX"},
 	{ARG, "t", "Time limit"},

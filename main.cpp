@@ -87,11 +87,14 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 		case 'L':
 			options.m = LBContour;
 			break;
+		case 'R':
+			options.m = RandCont;
+			break;
 		case 'l':
 			options.cPara = atoi(optarg);
 			break;
 		case 'n':
-			options.m = NInfeasible;
+			options.m = NInfCont;
 			break;
 		case 'd':
 			options.maxDepth = atoi(optarg);

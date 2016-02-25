@@ -18,7 +18,7 @@ using std::string;
 using std::stringstream;
 using std::setprecision;
 
-enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, NInfeasible};
+enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, NInfCont, RandCont };
 
 /*** Constants and Types ***/
 const double Tolerance = 0.000000001;
