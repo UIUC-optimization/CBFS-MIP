@@ -41,10 +41,10 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 		mCplex.use(new (mEnv) CbfsNodeCallback(mEnv, cbfs));               //IloCplex::NodeCallbackI::CbfsNodeCallback
 	}
 
-	/*Test region start: count variables*/
+	// Count integer variables in problem
 	cbfs->getIntVarArray(getIntVars());
 	cbfs->getCountIntVar(countIntVars);
-	/*Test region end: count variables*/
+
 }
 
 // Use CPLEX to solve the problem
@@ -126,14 +126,14 @@ void Cplex::solve()
 
 }
 
-//Attempt to extract integer variables from CPLEX model
+// Attempt to extract integer variables from CPLEX model
 IloNumVarArray Cplex::getIntVars() {
-	IloModel::Iterator iter(mModel);// = mModelIterator(mModel);
+	IloModel::Iterator iter(mModel);
 	unordered_set<int> vars;
 	IloNumVarArray allVars(mEnv);
 	int count = 0;
 	IloExpr expr;
-	IloExpr::LinearIterator iter2;
+	// Extract all variables and store all integer variables
 	while (iter.ok()) {
 		IloExtractable extr = *iter;
 		if (extr.isVariable()) {
@@ -146,21 +146,7 @@ IloNumVarArray Cplex::getIntVars() {
 				}
 				//printf("Variable detected. %d\n", count);
 			}
-		} 
-		//else if (extr.isNumExpr() || extr.isIntExpr() || extr.isObjective()) {
-		//	expr = IloExpr(extr.asNumExpr());
-		//	iter2 = expr.getLinearIterator();
-		//	while (iter2.ok()) {
-		//		IloNumVar temp = iter2.getVar();
-		//		vars.insert(&temp);
-		//		if (vars.size() > count) {
-		//			allVars.add(temp);
-		//			count++;
-		//		}
-		//		printf("Expression detected.%d\n", count);
-		//		++iter2;
-		//	}
-		//}
+		}
 		++iter;
 	}
 	printf("Count %d variables in total.\n", count);
@@ -263,27 +249,33 @@ NID CbfsData::getNextNode()
 	NID id; id._id = -1;
 	if (!mDiveCand.empty())
 	{
-		if (mProbStep != 0 || (mDiveCount % 30 == 10 && mNullW == 5))  //Temp setup: when mNullW = 2, perform probing when diving
+		// Perform probing either when specific condition satisfied or probing already started
+		if (mProbStep != 0 || (mDiveCount % mProbInterval == 1 && mProbStatus))
 			probStep();
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		if (mProbStep != 2) mDiveCount++;                     // Avoid an extra depth update when probing
 		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
-//		if (mReOptGap < 0.005) mDiveStatus = false;           // Experimental: if opt gap is small, stop diving
+//		if (mReOptGap < 0.005) mDiveStatus = false;           // Experiment: if opt gap is small, stop diving
 		return id;
 	}
-	// This section is to handle empty successor list mid-probing
-	else if (mNullW == 5 && mProbStep != 0)
+	// Hhandle empty successor list mid-probing
+	else if (mProbStatus && mProbStep != 0)
 	{
 		if (mProbStep == 1) mDiveCand = mProbPre;
 		else mDiveCand = mProbLeft;
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		mDiveCount++; mProbStep = 0;
-		if (mDiveCount >= 0.2*mTreeDepth) mDiveStatus = false;
 //		if (mReOptGap < 0.005) mDiveStatus = false;
 		return id;
 	}
+	// Two possibilities for mDiveCand to be empty: 
+	// 1. maximal depth reached in last iteration
+	// 2. node in previous iteration pruned somehow
+	// mMaxDepth > 0 means diving is on, then this block enables diving for the next contour.
+	// Experiment: if diving is enabled and situation 2 is true. Then we could use the other node from previous iteration if possible
+	// to continue diving.
 	else if (mMaxDepth > 0)
 	{
 		mDiveCount = 0;
@@ -351,12 +343,11 @@ void CbfsBranchCallback::main()
 	mCbfs->updateBounds(bestObj, incumVal, optGap);
 	if (1 == getNnodes()) mCbfs->updateContourBegin();
 
-	/* Feasibility test: start */
+	// Feasibility test of all integer variables
 	IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> varFeasible(mEnv);
 	getFeasibilities(varFeasible, mCbfs->mAllIntVars);
-	int countInfeasible = returnIntVarArray(varFeasible);
-	//printf("!!!array size is %d!!!\n", countInfeasible);
-	/* Feasibility test: end */
+	int countInfeasible = infeasIntVarsCount(varFeasible);
+	//printf("Number of infeasible variables is: %d.\n", countInfeasible);
 
 	// Loop through all of the branches produced by CPLEX
 	for (int i = 0; i < getNbranches(); ++i)
@@ -432,7 +423,7 @@ void CbfsBranchCallback::main()
 }
 
 // Return the number of infeasible variables for current node
-int CbfsBranchCallback::returnIntVarArray(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars) {
+int CbfsBranchCallback::infeasIntVarsCount(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars) {
 	int K = isIntVars.getSize();
 	int count = 0;
 	for (int i = 0; i < K; i++) {
@@ -468,6 +459,8 @@ CbfsNodeData::~CbfsNodeData()
 }
 
 // Update lower and upper bound
+// Potential improvements:
+// 1. Update contours after big improvement of opt gap
 void CbfsData::updateBounds(double lb, double ub, double gap)
 {
 //	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
@@ -475,16 +468,11 @@ void CbfsData::updateBounds(double lb, double ub, double gap)
 	bestUB = (bestUB > ub) ? ub : bestUB;
 	mReOptGap = gap;
 //	double newGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
-	//Temp setup: when mPosW is set at 2, we update contours after big improvement of opt gap.
-//	if (mPosW == 2)
-//	{
-//		if (oldGap > 1 && newGap < 1) updateContour();
-//		else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
-//	}
+//	if (oldGap > 1 && newGap < 1) updateContour();
+//	else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
 }
 
-// Contour update function. *This is not very efficient, but we should be fine for the moment because
-// it will only be called at most 4 times.
+// Contour update function. *This is not very efficient
 //void CbfsData::updateContour()
 //{
 //	ContourMap tempContours;
@@ -517,13 +505,13 @@ int CbfsData::calContour(CbfsNodeData* nodeData)
 		if (bestUB == INFINITY)
 		{
 			// The labeling function here could lead to extremely large contour numbers that might be a problem.
-			contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mcontPara)) : int(floor(fabs(lb)));
+			contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mContPara)) : int(floor(fabs(lb)));
 		}
 		else
 		{
-			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mcontPara)));
-			//If mcontPara is 5, then lb below 0.5 will be contour 0, lb between (0.5,0.7) will be 1, 0.1 each for 2, 3, 4.
-			if (mcontPara == 5)
+			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mContPara)));
+			//If mContPara is 5, then lb below 0.5 will be contour 0, lb between (0.5,0.7) will be 1, 0.1 each for 2, 3, 4.
+			if (mContPara == 5)
 			{
 				int percent;
 				percent = fabs((lb - bestLB) / (bestUB - bestLB));

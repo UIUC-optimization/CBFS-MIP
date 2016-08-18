@@ -29,14 +29,15 @@ struct opts;
 class CbfsData
 {
 public:
-	CbfsData(Mode m, double posW, double nullW, int mob, int cPara, int maxDepth) : 
+	CbfsData(Mode m, double posW, double nullW, int mob, int cPara, int maxDepth, int probInterval) : 
 		mMode(m), mPosW(posW), mNullW(nullW), nIters(0), mCurrContour(mContours.begin()), mMob(mob),
-		bestLB(-INFINITY), bestUB(INFINITY), mcontPara(cPara), mDiveCount(0), mProbStep(0), 
-		mDiveStart(0), mMaxDepth(maxDepth)
+		bestLB(-INFINITY), bestUB(INFINITY), mContPara(cPara), mDiveCount(0), mProbStep(0), 
+		mDiveStart(0), mMaxDepth(maxDepth), mProbInterval(probInterval)
 	{
 		mDiveStatus = (maxDepth > 0) ? true : false;
+		mProbStatus = (probInterval > 0) ? true : false;
 		mNInfeasibleCont = 20;
-		srand(time(0));
+		srand(time(0)); // Randomness is used in random contour
 	}
 	~CbfsData();
 
@@ -68,9 +69,10 @@ private:
 	ContourMap mContours;
 	ContourMap::iterator mCurrContour;
 	CbfsDive mDiveCand, mProbLeft, mProbRight, mProbPre;
-	int mMob, mcontPara, count, mDiveCount, mProbStep, mTreeDepth, mDiveStart, mMaxDepth;
-	int mNIntVars, mNInfeasibleCont;
-	bool mDiveStatus;
+	int mMob, mContPara, mProbStep;
+	int mDiveCount, mDiveStart, mMaxDepth, mProbStep, mProbInterval; // Diving and Probing parameters
+	int mNIntVars, mNInfeasibleCont;								 // Infeasible variable contour parameters
+	bool mDiveStatus, mProbStatus;									 // Diving and Probing triggers
 };
 
 class Cplex
@@ -102,7 +104,7 @@ public:
 	IloCplex::CallbackI* duplicateCallback() const 
 		{ return (new (getEnv()) CbfsBranchCallback(*this)); }
 	void main();
-	int returnIntVarArray(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars);
+	int infeasIntVarsCount(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars);
 
 private:
 	IloEnv mEnv;
