@@ -37,20 +37,28 @@ struct opts
 	int timelimit;
 	int mob;
 	int cPara;
+	int maxDepth;
+	int probInterval;
+	int randSeed;
 };
 
 static const char* optStrings[][3] =
 {
 	{BOOL, "C", "Cplex only (no CBFS)"},
 	{BOOL, "L", "LBContour (default 50)"},
+	{BOOL, "n", "Number of infeasible variable contour"},
 	{BOOL, "D", "Disable callbacks entirely (default)"},
 	{BOOL, "b", "Use no contours (BFS)"},
 	{BOOL, "w", "Use weighted contour rule (default pw = 1, nw = 1)"},
 	{BOOL, "W", "Disable warm starts and cut generation"},
+	{BOOL, "R", "Use random contour" },
+	{ARG, "d", "Use diving heuristic, set maximum diving depth"},
+	{ARG, "p", "Take probing step during diving, set probing interval"},
+	{ARG, "r", "Set random seed for CPLEX"},
 	{ARG, "t", "Time limit"},
 	{SEP, "", ""},
-	{ARG, "M", "Measure of best: 1 - estimate, 2 - lower bound, "
-		"3 - worst estimate, 4 - worst lower bound"},
+	{ARG, "M", "Measure of best: 1 - worst estimate, 2 - worst lower bound, "
+		"3 - best estimate, 4 - best lower bound"},
 	{ARG, "l", "LB contour number"},
 	{ARG, "P", "Weight for the positive assignments"},
 	{ARG, "N", "Weight for the null assignments"},
