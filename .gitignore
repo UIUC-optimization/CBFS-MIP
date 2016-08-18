@@ -1,0 +1,7 @@
+obj/
+
+# Ignore common code files
+*.a
+*.so
+*.d
+*.o
