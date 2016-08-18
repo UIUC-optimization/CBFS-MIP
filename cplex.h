@@ -69,7 +69,7 @@ private:
 	ContourMap mContours;
 	ContourMap::iterator mCurrContour;
 	CbfsDive mDiveCand, mProbLeft, mProbRight, mProbPre;
-	int mMob, mContPara, mProbStep;
+	int mMob, mContPara;
 	int mDiveCount, mDiveStart, mMaxDepth, mProbStep, mProbInterval; // Diving and Probing parameters
 	int mNIntVars, mNInfeasibleCont;								 // Infeasible variable contour parameters
 	bool mDiveStatus, mProbStatus;									 // Diving and Probing triggers
