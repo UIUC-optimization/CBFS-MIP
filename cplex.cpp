@@ -280,28 +280,12 @@ void CbfsBranchCallback::main()
 	// If there aren't any branches, just prune and return
 	if (getNbranches() == 0)
 	{
-		if (mJsonFile)
-		{
-			fprintf(mJsonFile, "{\"node_id\": %lld, \"is_int_feas\": ", getNodeId()._id);
-			if (isIntegerFeasible()) fprintf(mJsonFile, "true, ");
-			else fprintf(mJsonFile, "false, ");
-			fprintf(mJsonFile, "\"upper_bound\": %0.2f}\n", getObjValue());
-		}
 		prune();
 		return;
 	}
 
 	// myNodeData will be valid except at the root of the search
 	CbfsNodeData* myNodeData = (CbfsNodeData*)getNodeData();
-	if (mJsonFile)
-	{
-		double incumbentVal = INFINITY;
-		if (hasIncumbent()) incumbentVal = getIncumbentObjValue();
-		fprintf(mJsonFile, "{\"node_id\": %lld, \"explored_at\": %ld, \"lower_bound\": %0.2f, "
-			"\"upper_bound\": %0.2f, ", getNodeId()._id, getNnodes(), getObjValue(), incumbentVal);
-		if (!myNodeData)
-			fprintf(mJsonFile, "\"contour\": 0, ");
-	}
 
 	// Update lower bound and upper bound, and update contour if necessary
 	double incumVal = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
@@ -324,8 +308,6 @@ void CbfsBranchCallback::main()
 		int varId = vars[0].getId();
 
 		// Output
-		if (i == 0 && mJsonFile)
-			fprintf(mJsonFile, "\"branching_var\": \"%s\"}\n", vars[0].getName());
 
 		// Populate the CbfsNodeData structure corresponding to the new branch
 		CbfsNodeData* newNodeData;
@@ -370,12 +352,6 @@ void CbfsBranchCallback::main()
 		else newNodeData->contour = -1;
 
 		// Output
-		if (mJsonFile)
-		{
-			fprintf(mJsonFile, "{\"node_id\": %lld, \"child\": %lld, \"branch_dir\": %d, "
-				"\"estimate\": %0.2f, \"contour\": %d}\n", getNodeId()._id, newNodeData->id._id,
-				dirs[0], newNodeData->estimate, newNodeData->contour);
-		}
 	}
 
 	// Mark this node as explored so we don't print output when it gets deleted
@@ -400,11 +376,6 @@ CbfsNodeData::~CbfsNodeData()
 		mCbfs->delNode(this);
 
 	// If the node hasn't been explored yet, mark it as pruned in the JSON file
-	if (mJsonFile && !explored)
-	{
-		fprintf(mJsonFile, "{\"node_id\": %lld, \"pruned_at\": %ld, \"lower_bound\": %0.2f, "
-			"\"upper_bound\": %0.2f}\n", id._id, mCbfs->getNumIterations(), lpval, incumbent);
-	}
 }
 
 // Update lower and upper bound
