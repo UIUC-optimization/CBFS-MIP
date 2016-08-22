@@ -46,7 +46,7 @@ static const char* optStrings[][3] =
 {
 	{BOOL, "C", "Cplex only (no CBFS)"},
 	{BOOL, "L", "LBContour (default 50)"},
-	{BOOL, "n", "Number of infeasible variable contour"},
+	{BOOL, "n", "Infeasible variable contour (Disabled)"},
 	{BOOL, "D", "Disable callbacks entirely (default)"},
 	{BOOL, "b", "Use no contours (BFS)"},
 	{BOOL, "w", "Use weighted contour rule (default pw = 1, nw = 1)"},
@@ -72,5 +72,3 @@ const char* parseOpts(int argc, char* argv[], opts& options);
 void usage(const char* name);
 
 #endif // MAIN_H
-
-
