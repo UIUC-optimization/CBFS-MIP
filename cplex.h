@@ -88,7 +88,7 @@ class CbfsBranchCallback : public IloCplex::BranchCallbackI
 {
 public:
 	CbfsBranchCallback(IloEnv env, CbfsData* cbfs, FILE* jsonFile) : 
-		IloCplex::BranchCallbackI(env), mCbfs(cbfs), mJsonFile(jsonFile), mEnv(env) { }
+		IloCplex::BranchCallbackI(env), mCbfs(cbfs), mJsonFile(jsonFile) { }
 	IloCplex::CallbackI* duplicateCallback() const 
 		{ return (new (getEnv()) CbfsBranchCallback(*this)); }
 	void main();
