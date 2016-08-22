@@ -337,11 +337,11 @@ void CbfsBranchCallback::main()
 	}
 
 	// Update lower bound and upper bound, and update contour if necessary
-	double incumVal = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
-	double bestObj = getBestObjValue();
-	double optGap = getMIPRelativeGap();
-	mCbfs->updateBounds(bestObj, incumVal, optGap);
-	if (1 == getNnodes()) mCbfs->updateContourBegin();
+	//double incumVal = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
+	//double bestObj = getBestObjValue();
+	//double optGap = getMIPRelativeGap();
+	//mCbfs->updateBounds(bestObj, incumVal, optGap);
+	//if (1 == getNnodes()) mCbfs->updateContourBegin();
 
 	// Feasibility test of all integer variables
 	IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> varFeasible(mEnv);
