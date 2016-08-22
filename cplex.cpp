@@ -157,9 +157,6 @@ IloNumVarArray Cplex::getIntVars() {
 // Compute the contour that a new node belongs to, and add it to the data structure
 void CbfsData::addNode(CbfsNodeData* nodeData)
 {
-	//Store diving candidate if diving is on
-	if (mDiveStatus)
-		mDiveCand.push_back(nodeData);
 
 	// Compute the contour for the node
 	nodeData->contour = calContour(nodeData);
@@ -189,13 +186,6 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 
 void CbfsData::delNode(CbfsNodeData* nodeData)
 {
-	//If mDiveCand has elements, then first see if node to be deleted is in here.
-	if (!mDiveCand.empty())
-	{
-		if (nodeData->id == mDiveCand.front()->id) mDiveCand.pop_front();
-		else if (nodeData->id == mDiveCand.back()->id) mDiveCand.pop_back();
-		if (mDiveCand.size() > 2) throw ERROR << "More than 2 elements in mDiveCand.";
-	}
 	// Look up the node by the measure of best key
 	double search;
 	switch (mMob)
@@ -247,40 +237,7 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 NID CbfsData::getNextNode()
 {
 	NID id; id._id = -1;
-	if (!mDiveCand.empty())
-	{
-		// Perform probing either when specific condition satisfied or probing already started
-		if (mProbStep != 0 || (mDiveCount % mProbInterval == 1 && mProbStatus))
-			probStep();
-		id = mDiveCand.front()->id;
-		mDiveCand.clear();
-		if (mProbStep != 2) mDiveCount++;                     // Avoid an extra depth update when probing
-		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
-//		if (mReOptGap < 0.005) mDiveStatus = false;           // Experiment: if opt gap is small, stop diving
-		return id;
-	}
-	// Hhandle empty successor list mid-probing
-	else if (mProbStatus && mProbStep != 0)
-	{
-		if (mProbStep == 1) mDiveCand = mProbPre;
-		else mDiveCand = mProbLeft;
-		id = mDiveCand.front()->id;
-		mDiveCand.clear();
-		mDiveCount++; mProbStep = 0;
-//		if (mReOptGap < 0.005) mDiveStatus = false;
-		return id;
-	}
-	// Two possibilities for mDiveCand to be empty: 
-	// 1. maximal depth reached in last iteration
-	// 2. node in previous iteration pruned somehow
-	// mMaxDepth > 0 means diving is on, then this block enables diving for the next contour.
-	// Experiment: if diving is enabled and situation 2 is true. Then we could use the other node from previous iteration if possible
-	// to continue diving.
-	else if (mMaxDepth > 0)
-	{
-		mDiveCount = 0;
-		mDiveStatus = true;
-	}
+
 	// Increment the iterator into the heap structure
 	++mCurrContour;
 	if (mCurrContour == mContours.end())
@@ -539,29 +496,4 @@ int CbfsData::calContour(CbfsNodeData* nodeData)
 		contour = rand() % 5;
 	}
 	return contour;
-}
-
-// Main procedure of probing step: store the two parent node, explore both and compare results
-void CbfsData::probStep()
-{
-	if (mProbStep == 0 && mDiveCand.size() < 2) return;
-	switch (mProbStep)
-	{
-	    case 0:
-		    mProbPre = mDiveCand;
-			mProbPre.pop_front();
-		    mProbStep = 1;
-			break;
-		case 1:
-			mProbLeft = mDiveCand;
-			mDiveCand = mProbPre;
-			mProbStep = 2;
-			break;
-		case 2:
-			if (mProbLeft.front()->estimate <= mDiveCand.front()->estimate) mDiveCand = mProbLeft;
-			mProbStep = 0;
-			break;
-		default:
-			throw ERROR << "Invalid probing parameter.";
-	}
 }
