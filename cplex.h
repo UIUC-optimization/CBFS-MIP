@@ -20,7 +20,7 @@ using namespace std;
 
 class CbfsNodeData;
 typedef IloCplex::MIPCallbackI::NodeId NID;
-typedef multimap<double, CbfsNodeData*> CbfsHeap;
+typedef multimap<double, NID> CbfsHeap;
 typedef map<int, CbfsHeap> ContourMap;
 typedef map<int, pair<int,int>> RangeMap;
 typedef list<CbfsNodeData*> CbfsDive;
