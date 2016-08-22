@@ -184,7 +184,7 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 			break;
 	}
 	// The contour heap now store pointers to the nodeData instances, instead of NID. Below, changes are made accordingly.
-	mContours[nodeData->contour].insert({best, nodeData});
+	mContours[nodeData->contour].insert({best, nodeData->id});
 }
 
 void CbfsData::delNode(CbfsNodeData* nodeData)
@@ -222,7 +222,7 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 	for (auto i = range.first; i != range.second; ++i)
 	{
 		// pointers to nodeData are stored in contour heap
-		if ((i->second)->id == nodeData->id) 
+		if (i->second == nodeData->id) 
 		{ 
 			mContours[nodeData->contour].erase(i); 
 			break; 
@@ -289,7 +289,7 @@ NID CbfsData::getNextNode()
 	// If the heap has a non-empty contour, return the best thing in that contour
 	// pointers to nodeData are stored in contour heap
 	if (mCurrContour != mContours.end())
-		id = (mCurrContour->second.begin()->second)->id;
+		id = mCurrContour->second.begin()->second;
 
 	// There should always be a next node when we call this
 	if (id._id == -1) 
