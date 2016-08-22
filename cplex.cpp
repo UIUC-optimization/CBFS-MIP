@@ -157,9 +157,13 @@ IloNumVarArray Cplex::getIntVars() {
 // Compute the contour that a new node belongs to, and add it to the data structure
 void CbfsData::addNode(CbfsNodeData* nodeData)
 {
-
 	// Compute the contour for the node
-	nodeData->contour = calContour(nodeData);
+	switch (mMode)
+	{
+		case Weighted:
+			nodeData->contour = mPosW * nodeData->numPos+ mNullW * nodeData->numNull;
+			break;
+	}
 
 	// TODO - should we use estimate or lower bound here?  I think estimate's the right thing, but
 	// I'm not 100% sure of this.  We should try the other as well
@@ -415,85 +419,3 @@ CbfsNodeData::~CbfsNodeData()
 	}
 }
 
-// Update lower and upper bound
-// Potential improvements:
-// 1. Update contours after big improvement of opt gap
-void CbfsData::updateBounds(double lb, double ub, double gap)
-{
-//	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
-	bestLB = (bestLB < lb) ? lb : bestLB;
-	bestUB = (bestUB > ub) ? ub : bestUB;
-	mReOptGap = gap;
-//	double newGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
-//	if (oldGap > 1 && newGap < 1) updateContour();
-//	else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
-}
-
-// Contour update function. *This is not very efficient
-//void CbfsData::updateContour()
-//{
-//	ContourMap tempContours;
-//	int contour;
-//
-//	//Go through all nodes in existing contours and determine their new contour
-//	for (ContourMap::iterator i = mContours.begin(); i != mContours.end(); i++)
-//	{
-//		for (CbfsHeap::iterator j = ((*i).second).begin(); j != ((*i).second).end(); j++)
-//		{
-//			contour = calContour((*j).second->lpval);
-//			((*j).second)->contour = contour;
-//			tempContours[contour].insert({ (*j).first, (*j).second });
-//		}
-//	}
-//	mContours.clear();
-//	mContours = tempContours;
-//	mCurrContour = mContours.begin();
-//}
-
-int CbfsData::calContour(CbfsNodeData* nodeData)
-{
-	int contour;
-	int lb = nodeData->lpval;
-	switch (mMode) {
-	case Weighted:
-		contour = mPosW * nodeData->numPos + mNullW * nodeData->numNull;
-		break;
-	case LBContour:
-		if (bestUB == INFINITY)
-		{
-			// The labeling function here could lead to extremely large contour numbers that might be a problem.
-			contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mContPara)) : int(floor(fabs(lb)));
-		}
-		else
-		{
-			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mContPara)));
-			//If mContPara is 5, then lb below 0.5 will be contour 0, lb between (0.5,0.7) will be 1, 0.1 each for 2, 3, 4.
-			if (mContPara == 5)
-			{
-				int percent;
-				percent = fabs((lb - bestLB) / (bestUB - bestLB));
-				if (percent < 0.5) contour == 0;
-				else if (percent < 0.7) contour == 1;
-				else if (percent < 0.8) contour == 2;
-				else if (percent < 0.9) contour == 3;
-				else contour == 4;
-			}
-		}
-		break;
-	case NInfCont:
-		//printf("Number of infeasible variables: %d.\n", nodeData->numInfeasibles);
-		//contour = mNIntVars - nodeData->numInfeasibles;
-		//double def = double(mNIntVars - nodeData->numInfeasibles) / (double)(mNIntVars);
-		//if (def <= 0.5) contour = 0;
-		//else {
-		//	def = (def - 0.5) / 0.5;
-		//	contour = floor(def * mNInfeasibleCont + 1);
-		//}
-		contour = double(mNIntVars - nodeData->numInfeasibles) / (double)(mNIntVars) * 10;
-		//printf("In contour: %d.\n", contour);
-		break;
-	case RandCont:
-		contour = rand() % 5;
-	}
-	return contour;
-}
