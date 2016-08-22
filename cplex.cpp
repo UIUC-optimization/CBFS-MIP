@@ -40,11 +40,6 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 		mCplex.use(new (mEnv) CbfsBranchCallback(mEnv, cbfs, mJsonFile));  //IloCplex::BranchCallbackI::CbfsBranchCallback
 		mCplex.use(new (mEnv) CbfsNodeCallback(mEnv, cbfs));               //IloCplex::NodeCallbackI::CbfsNodeCallback
 	}
-
-	// Count integer variables in problem
-	cbfs->getIntVarArray(getIntVars());
-	cbfs->getCountIntVar(countIntVars);
-
 }
 
 // Use CPLEX to solve the problem
@@ -124,34 +119,6 @@ void Cplex::solve()
 			status, mCplex.getNnodes(), elapsed);
 	}
 
-}
-
-// Attempt to extract integer variables from CPLEX model
-IloNumVarArray Cplex::getIntVars() {
-	IloModel::Iterator iter(mModel);
-	unordered_set<int> vars;
-	IloNumVarArray allVars(mEnv);
-	int count = 0;
-	IloExpr expr;
-	// Extract all variables and store all integer variables
-	while (iter.ok()) {
-		IloExtractable extr = *iter;
-		if (extr.isVariable()) {
-			IloNumVar temp = extr.asVariable();
-			if (temp.getType() != 2) {
-				vars.insert(temp.getId());
-				if (vars.size() > count) {
-					allVars.add(temp);
-					count++;
-				}
-				//printf("Variable detected. %d\n", count);
-			}
-		}
-		++iter;
-	}
-	printf("Count %d variables in total.\n", count);
-	countIntVars = count;
-	return allVars;
 }
 
 // Compute the contour that a new node belongs to, and add it to the data structure
@@ -248,7 +215,6 @@ NID CbfsData::getNextNode()
 		mCurrContour = mContours.begin();
 
 	// If the heap has a non-empty contour, return the best thing in that contour
-	// pointers to nodeData are stored in contour heap
 	if (mCurrContour != mContours.end())
 		id = mCurrContour->second.begin()->second;
 
@@ -305,9 +271,6 @@ void CbfsBranchCallback::main()
 	//if (1 == getNnodes()) mCbfs->updateContourBegin();
 
 	// Feasibility test of all integer variables
-	IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> varFeasible(mEnv);
-	getFeasibilities(varFeasible, mCbfs->mAllIntVars);
-	int countInfeasible = infeasIntVarsCount(varFeasible);
 	//printf("Number of infeasible variables is: %d.\n", countInfeasible);
 
 	// Loop through all of the branches produced by CPLEX
@@ -340,7 +303,6 @@ void CbfsBranchCallback::main()
 		newNodeData->lpval = getObjValue();
 		newNodeData->incumbent = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
 		newNodeData->parent = getNodeId()._id;
-		newNodeData->numInfeasibles = countInfeasible;
 		newNodeData->depth++;
 
 		// Compute the values of the new bounds for the variable we're branching on
@@ -381,17 +343,6 @@ void CbfsBranchCallback::main()
 
 	// Mark this node as explored so we don't print output when it gets deleted
 	if (myNodeData) myNodeData->explored = true;
-}
-
-// Return the number of infeasible variables for current node
-int CbfsBranchCallback::infeasIntVarsCount(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars) {
-	int K = isIntVars.getSize();
-	int count = 0;
-	for (int i = 0; i < K; i++) {
-		if (isIntVars[i] == CPX_INTEGER_INFEASIBLE)
-			count++;
-	}
-	return count;
 }
 
 // Select a new node to branch on according to the CBFS rule

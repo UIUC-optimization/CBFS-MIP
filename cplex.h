@@ -43,10 +43,6 @@ public:
 
 	void addNode(CbfsNodeData* nodeData);
 	void delNode(CbfsNodeData* nodeData);
-	void updateContour();
-	void updateBounds(double lb, double ub, double gap);
-	void probStep();
-	int calContour(CbfsNodeData* nodeData);
 
 	NID getNextNode();
 
@@ -54,11 +50,6 @@ public:
 	void setSense(IloObjective::Sense s) { mSense = s; }
 	long getNumIterations() { return nIters; }
 	void setNumIterations(long i) { nIters = i; }
-	void updateContourBegin() { mCurrContour = mContours.begin(); }
-	void getIntVarArray(IloNumVarArray input) { mAllIntVars = input.toIntVarArray(); }
-	void getCountIntVar(int input) { mNIntVars = input; }
-
-	IloIntVarArray mAllIntVars;   //Array for all (int) variables, I will let this exposed for now.
 
 private:
 	Mode mMode;
@@ -82,7 +73,6 @@ public:
 
 	void solve();
 	IloObjective::Sense getSense() { return mObj.getSense(); }
-	IloNumVarArray getIntVars();
 
 private:
 	IloEnv mEnv;
@@ -91,7 +81,6 @@ private:
 	IloObjective mObj;
 
 	FILE* mJsonFile;
-	int countIntVars;
 
 };
 
@@ -103,10 +92,8 @@ public:
 	IloCplex::CallbackI* duplicateCallback() const 
 		{ return (new (getEnv()) CbfsBranchCallback(*this)); }
 	void main();
-	int infeasIntVarsCount(IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> isIntVars);
 
 private:
-	IloEnv mEnv;
 	CbfsData* mCbfs;
 	FILE* mJsonFile;
 };
