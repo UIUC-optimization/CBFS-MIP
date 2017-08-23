@@ -124,12 +124,16 @@ void Cplex::solve()
 // Compute the contour that a new node belongs to, and add it to the data structure
 void CbfsData::addNode(CbfsNodeData* nodeData)
 {
-	//Store diving candidate if diving is on
-	if (mDiveStatus)
-		mDiveCand.push_back(nodeData);
 
 	// Compute the contour for the node
 	nodeData->contour = calContour(nodeData);
+
+	//Store diving candidate if diving is on
+	if (mDiveStatus) {
+		mDiveCand.push_back(nodeData);
+		if (mDiveCount == 0)
+			mDiveStart = mCurrContour->first;		// record contour number of the dive start node
+	}
 
 	// TODO - should we use estimate or lower bound here?  I think estimate's the right thing, but
 	// I'm not 100% sure of this.  We should try the other as well
@@ -310,6 +314,18 @@ ContourMap::iterator CbfsData::getNextCont()
 	return iterToBe;
 }
 
+void CbfsData::updateContScores()
+{
+	switch (mMode)
+	{
+	case LBContour:
+		mContScores[mDiveStart]++;
+		break;
+	default:
+		break;
+	}
+}
+
 void CbfsData::updateContScores(int contID, int score)
 {
 	switch (mMode) 
@@ -403,6 +419,18 @@ void CbfsBranchCallback::main()
 			if (isIntegerFeasible()) fprintf(mJsonFile, "true, ");
 			else fprintf(mJsonFile, "false, ");
 			fprintf(mJsonFile, "\"upper_bound\": %0.2f}\n", getObjValue());
+		}
+		if (isIntegerFeasible()) 
+		{
+			int ub = mCbfs->getBestUB();
+			int curSol = getObjValue();
+			if (ub == INFINITY)
+				mCbfs->setBestUB(curSol);	// first feasible solution
+			else if (ub > curSol)
+			{
+				mCbfs->setBestUB(curSol);
+
+			}
 		}
 		prune();
 		return;

@@ -45,6 +45,7 @@ public:
 
 	void addNode(CbfsNodeData* nodeData);
 	void delNode(CbfsNodeData* nodeData);
+	void updateContScores();
 	void updateContScores(int contID, int score);
 	void updateBounds(double lb, double ub, double gap);
 	void probStep();
@@ -56,6 +57,8 @@ public:
 	Mode getMode() { return mMode; }
 	void setSense(IloObjective::Sense s) { mSense = s; }
 	long getNumIterations() { return nIters; }
+	double getBestUB() { return bestUB; }
+	void setBestUB(double ub) { bestUB = ub; }
 	void setNumIterations(long i) { nIters = i; }
 	void updateContourBegin() { mCurrContour = mContours.begin(); }
 
