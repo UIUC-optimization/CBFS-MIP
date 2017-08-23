@@ -30,25 +30,28 @@ class CbfsData
 {
 public:
 	CbfsData(Mode m, double posW, double nullW, int mob, int cPara, int maxDepth, int probInterval) : 
-		mMode(m), mPosW(posW), mNullW(nullW), nIters(0), mCurrContour(mContours.begin()), mMob(mob),
-		bestLB(-INFINITY), bestUB(INFINITY), mContPara(cPara), mDiveCount(0), mProbStep(0), 
-		mDiveStart(0), mMaxDepth(maxDepth), mProbInterval(probInterval)
+		mMode(m), mPosW(posW), mNullW(nullW), bestLB(-INFINITY), bestUB(INFINITY), nIters(0),
+		mCurrContour(mContours.begin()), mMob(mob), mContPara(cPara), mDiveCount(0), mDiveStart(0),
+		mMaxDepth(maxDepth), mProbStep(0), mProbInterval(probInterval)
 	{
 		mDiveStatus = (maxDepth > 0) ? true : false;
 		mProbStatus = (probInterval > 0) ? true : false;
 		mNInfeasibleCont = 20;
+		mContScores.resize(cPara, 0);
+		mTieBreak = LIFO;
 		srand(time(0)); // Randomness is used in random contour
 	}
 	~CbfsData();
 
 	void addNode(CbfsNodeData* nodeData);
 	void delNode(CbfsNodeData* nodeData);
-	void updateContour();
+	void updateContScores(int contID, int score);
 	void updateBounds(double lb, double ub, double gap);
 	void probStep();
 	int calContour(CbfsNodeData* nodeData);
 
 	NID getNextNode();
+	ContourMap::iterator getNextCont();
 
 	Mode getMode() { return mMode; }
 	void setSense(IloObjective::Sense s) { mSense = s; }
@@ -58,6 +61,7 @@ public:
 
 private:
 	Mode mMode;
+	TieBreak mTieBreak;
 	IloObjective::Sense mSense;
 	double mPosW, mNullW, bestLB, bestUB, mReOptGap;
 	long nIters;
@@ -69,6 +73,8 @@ private:
 	int mDiveCount, mDiveStart, mMaxDepth, mProbStep, mProbInterval; // Diving and Probing parameters
 	int mNIntVars, mNInfeasibleCont;								 // Infeasible variable contour parameters
 	bool mDiveStatus, mProbStatus;									 // Diving and Probing triggers
+
+	vector<int> mContScores;
 };
 
 class Cplex

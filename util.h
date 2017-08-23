@@ -19,6 +19,7 @@ using std::stringstream;
 using std::setprecision;
 
 enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, NInfCont, RandCont };
+enum TieBreak { FIFO, LIFO };
 
 /*** Constants and Types ***/
 const double Tolerance = 0.000000001;

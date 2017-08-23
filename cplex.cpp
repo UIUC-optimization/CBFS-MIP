@@ -149,6 +149,9 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 		case 4:
 			best = (mSense == IloObjective::Maximize) ? -nodeData->lpval : nodeData->lpval;
 			break;
+		default:
+			best = (mSense == IloObjective::Maximize) ? -nodeData->estimate : nodeData->estimate;
+			break;
 	}
 	// The contour heap now store pointers to the nodeData instances, instead of NID. Below, changes are made accordingly.
 	mContours[nodeData->contour].insert({best, nodeData->id});
@@ -179,6 +182,9 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 		case 4:
 			search = (mSense == IloObjective::Maximize) ? -nodeData->lpval : nodeData->lpval;
 			break;
+		default:
+			search = (mSense == IloObjective::Maximize) ? -nodeData->estimate : nodeData->estimate;
+			break;
 	}
 	auto range = mContours[nodeData->contour].equal_range(search);
 
@@ -199,7 +205,12 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 	// If the contour is empty, remove it from the map
 	if (mContours[nodeData->contour].empty())
 	{
-		// If the current contour pointer points to the thing we're deleting, increment it
+		/*************************************/
+		// When contour becores empty, clear corresponding score
+		//TODO: Use a separate function for contour score updates
+		updateContScores(nodeData->contour, 0);
+		/*************************************/
+		// If the current iterator points to the contour we're deleting, increment it
 		if (mCurrContour == mContours.find(nodeData->contour))
 		{
 			if (mCurrContour == mContours.begin())
@@ -223,7 +234,6 @@ NID CbfsData::getNextNode()
 		mDiveCand.clear();
 		if (mProbStep != 2) mDiveCount++;                     // Avoid an extra depth update when probing
 		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
-//		if (mReOptGap < 0.005) mDiveStatus = false;           // Experiment: if opt gap is small, stop diving
 		return id;
 	}
 	// Hhandle empty successor list mid-probing
@@ -234,29 +244,28 @@ NID CbfsData::getNextNode()
 		id = mDiveCand.front()->id;
 		mDiveCand.clear();
 		mDiveCount++; mProbStep = 0;
-//		if (mReOptGap < 0.005) mDiveStatus = false;
 		return id;
 	}
 	// Two possibilities for mDiveCand to be empty: 
 	// 1. maximal depth reached in last iteration
 	// 2. node in previous iteration pruned somehow
 	// mMaxDepth > 0 means diving is on, then this block enables diving for the next contour.
-	// Experiment: if diving is enabled and situation 2 is true. Then we could use the other node from previous iteration if possible
-	// to continue diving.
 	else if (mMaxDepth > 0)
 	{
 		mDiveCount = 0;
 		mDiveStatus = true;
 	}
 	// Increment the iterator into the heap structure
-	++mCurrContour;
+	//++mCurrContour;
+	mCurrContour = getNextCont();
 	if (mCurrContour == mContours.end())
 		mCurrContour = mContours.begin();
 
 	// If the heap has a non-empty contour, return the best thing in that contour
 	// pointers to nodeData are stored in contour heap
-	if (mCurrContour != mContours.end())
+	if (mCurrContour != mContours.end()) {
 		id = mCurrContour->second.begin()->second;
+	}
 
 	// There should always be a next node when we call this
 	if (id._id == -1) 
@@ -269,6 +278,114 @@ NID CbfsData::getNextNode()
 	}
 
 	return id;
+}
+
+// Select the next contour to be explored
+ContourMap::iterator CbfsData::getNextCont()
+{
+	ContourMap::iterator iterToBe;
+	int sumScore = 0;
+	int randScore;
+	switch (mMode) 
+	{
+	case LBContour:
+		iterToBe = mContours.begin();
+		for (int i = 0; i < mContScores.size(); i++)
+		{
+			sumScore += mContScores[i];
+		}
+		randScore = rand() % sumScore;
+		sumScore = 0;
+		for (int i = 0; i < mContScores.size(); i++, iterToBe++)
+		{
+			sumScore += mContScores[i];
+			if (mContScores[i] != 0 && randScore < sumScore)
+				break;
+		}
+		break;
+	default:
+		iterToBe = mCurrContour;
+		iterToBe++;
+	}
+	return iterToBe;
+}
+
+void CbfsData::updateContScores(int contID, int score)
+{
+	switch (mMode) 
+	{
+	case LBContour:
+		mContScores[contID] = score;
+		break;
+	default:
+		break;
+	}
+}
+
+// Update lower and upper bound, optimality gap
+void CbfsData::updateBounds(double lb, double ub, double gap)
+{
+	bestLB = (bestLB < lb) ? lb : bestLB;
+	bestUB = (bestUB > ub) ? ub : bestUB;
+	mReOptGap = gap;
+}
+
+int CbfsData::calContour(CbfsNodeData* nodeData)
+{
+	int contour;
+	int lb = nodeData->lpval;
+	switch (mMode) {
+	case Weighted:
+		contour = mPosW * nodeData->numPos + mNullW * nodeData->numNull;
+		break;
+	case LBContour:
+		if (bestUB == INFINITY)
+		{
+			// The labeling function here could lead to extremely large contour numbers that might be a problem.
+			contour = 0;
+		}
+		else
+		{
+			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mContPara)));
+		}
+		/*************************************/
+		// When new non-empty contour appears, update corresponding score
+		//TODO: Use a separate function for contour score updates
+		if (mContScores[contour] == 0)
+			updateContScores(contour, 1);
+		/*************************************/
+		break;
+	case RandCont:
+		contour = rand() % 5;
+	default:
+		contour = 0;
+	}
+	return contour;
+}
+
+// Main procedure of probing step: store the two parent node, explore both and compare results
+void CbfsData::probStep()
+{
+	if (mProbStep == 0 && mDiveCand.size() < 2) return;
+	switch (mProbStep)
+	{
+	case 0:
+		mProbPre = mDiveCand;
+		mProbPre.pop_front();
+		mProbStep = 1;
+		break;
+	case 1:
+		mProbLeft = mDiveCand;
+		mDiveCand = mProbPre;
+		mProbStep = 2;
+		break;
+	case 2:
+		if (mProbLeft.front()->estimate <= mDiveCand.front()->estimate) mDiveCand = mProbLeft;
+		mProbStep = 0;
+		break;
+	default:
+		throw ERROR << "Invalid probing parameter.";
+	}
 }
 
 // Do branching and store the generated nodes
@@ -404,101 +521,5 @@ CbfsNodeData::~CbfsNodeData()
 	{
 		fprintf(mJsonFile, "{\"node_id\": %lld, \"pruned_at\": %ld, \"lower_bound\": %0.2f, "
 			"\"upper_bound\": %0.2f}\n", id._id, mCbfs->getNumIterations(), lpval, incumbent);
-	}
-}
-
-// Update lower and upper bound
-// Potential improvements:
-// 1. Update contours after big improvement of opt gap
-void CbfsData::updateBounds(double lb, double ub, double gap)
-{
-//	double oldGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
-	bestLB = (bestLB < lb) ? lb : bestLB;
-	bestUB = (bestUB > ub) ? ub : bestUB;
-	mReOptGap = gap;
-//	double newGap = (bestUB - bestLB) / (fabs(bestLB) + 0.000000001);
-//	if (oldGap > 1 && newGap < 1) updateContour();
-//	else if (oldGap <= 1 && oldGap - newGap > 0.1) updateContour();
-}
-
-// Contour update function. *This is not very efficient
-//void CbfsData::updateContour()
-//{
-//	ContourMap tempContours;
-//	int contour;
-//
-//	//Go through all nodes in existing contours and determine their new contour
-//	for (ContourMap::iterator i = mContours.begin(); i != mContours.end(); i++)
-//	{
-//		for (CbfsHeap::iterator j = ((*i).second).begin(); j != ((*i).second).end(); j++)
-//		{
-//			contour = calContour((*j).second->lpval);
-//			((*j).second)->contour = contour;
-//			tempContours[contour].insert({ (*j).first, (*j).second });
-//		}
-//	}
-//	mContours.clear();
-//	mContours = tempContours;
-//	mCurrContour = mContours.begin();
-//}
-
-int CbfsData::calContour(CbfsNodeData* nodeData)
-{
-	int contour;
-	int lb = nodeData->lpval;
-	switch (mMode) {
-	case Weighted:
-		contour = mPosW * nodeData->numPos + mNullW * nodeData->numNull;
-		break;
-	case LBContour:
-		if (bestUB == INFINITY)
-		{
-			// The labeling function here could lead to extremely large contour numbers that might be a problem.
-			contour = (bestLB >= 0.01 || bestLB <= -0.01) ? int(floor(fabs((lb - bestLB) / bestLB) * mContPara)) : int(floor(fabs(lb)));
-		}
-		else
-		{
-			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mContPara)));
-			//If mContPara is 5, then lb below 0.5 will be contour 0, lb between (0.5,0.7) will be 1, 0.1 each for 2, 3, 4.
-			if (mContPara == 5)
-			{
-				int percent;
-				percent = fabs((lb - bestLB) / (bestUB - bestLB));
-				if (percent < 0.5) contour == 0;
-				else if (percent < 0.7) contour == 1;
-				else if (percent < 0.8) contour == 2;
-				else if (percent < 0.9) contour == 3;
-				else contour == 4;
-			}
-		}
-		break;
-	case RandCont:
-		contour = rand() % 5;
-	}
-	return contour;
-}
-
-// Main procedure of probing step: store the two parent node, explore both and compare results
-void CbfsData::probStep()
-{
-	if (mProbStep == 0 && mDiveCand.size() < 2) return;
-	switch (mProbStep)
-	{
-	    case 0:
-		    mProbPre = mDiveCand;
-			mProbPre.pop_front();
-		    mProbStep = 1;
-			break;
-		case 1:
-			mProbLeft = mDiveCand;
-			mDiveCand = mProbPre;
-			mProbStep = 2;
-			break;
-		case 2:
-			if (mProbLeft.front()->estimate <= mDiveCand.front()->estimate) mDiveCand = mProbLeft;
-			mProbStep = 0;
-			break;
-		default:
-			throw ERROR << "Invalid probing parameter.";
 	}
 }
