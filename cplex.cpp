@@ -429,7 +429,7 @@ void CbfsBranchCallback::main()
 			else if (ub > curSol)
 			{
 				mCbfs->setBestUB(curSol);
-
+				mCbfs->updateContScores();
 			}
 		}
 		prune();
