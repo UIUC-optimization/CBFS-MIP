@@ -275,10 +275,16 @@ NID CbfsData::getNextNode()
 		{
 		case FIFO:
 			id = range.first->second;
+			break;
 		case LIFO:
 			id = (--range.second)->second;
+			break;
+		case OG:
+			id = mCurrContour->second.begin()->second;
+			break;
 		default:
 			id = mCurrContour->second.begin()->second;
+			break;
 		}
 		//id = mCurrContour->second.begin()->second;
 	}

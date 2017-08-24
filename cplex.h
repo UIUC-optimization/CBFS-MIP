@@ -38,7 +38,7 @@ public:
 		mProbStatus = (probInterval > 0) ? true : false;
 		mNInfeasibleCont = 20;
 		mContScores.resize(cPara, 0);
-		mTieBreak = LIFO;
+		mTieBreak = OG;
 		srand(time(0)); // Randomness is used in random contour
 	}
 	~CbfsData();
