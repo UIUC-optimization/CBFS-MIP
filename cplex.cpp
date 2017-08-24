@@ -268,7 +268,19 @@ NID CbfsData::getNextNode()
 	// If the heap has a non-empty contour, return the best thing in that contour
 	// pointers to nodeData are stored in contour heap
 	if (mCurrContour != mContours.end()) {
-		id = mCurrContour->second.begin()->second;
+		/* Implement tie breaking rules */
+		double search = mCurrContour->second.begin()->first;
+		auto range = mCurrContour->second.equal_range(search);
+		switch (mTieBreak)
+		{
+		case FIFO:
+			id = range.first->second;
+		case LIFO:
+			id = (--range.second)->second;
+		default:
+			id = mCurrContour->second.begin()->second;
+		}
+		//id = mCurrContour->second.begin()->second;
 	}
 
 	// There should always be a next node when we call this
@@ -420,21 +432,24 @@ void CbfsBranchCallback::main()
 			else fprintf(mJsonFile, "false, ");
 			fprintf(mJsonFile, "\"upper_bound\": %0.2f}\n", getObjValue());
 		}
+		// If the solution is feasible, then check if this is the new incumbent solution
 		if (isIntegerFeasible()) 
 		{
 			int ub = mCbfs->getBestUB();
 			int curSol = getObjValue();
-			if (ub == INFINITY)
-				mCbfs->setBestUB(curSol);	// first feasible solution
-			else if (ub > curSol)
-			{
-				mCbfs->setBestUB(curSol);
+			if (ub != INFINITY && ub > curSol)
 				mCbfs->updateContScores();
-			}
 		}
 		prune();
 		return;
 	}
+
+	// Update lower bound and upper bound, and update contour if necessary
+	double incumVal = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
+	double bestObj = getBestObjValue();
+	double optGap = getMIPRelativeGap();
+	mCbfs->updateBounds(bestObj, incumVal, optGap);
+	if (1 == getNnodes()) mCbfs->updateContourBegin();
 
 	// myNodeData will be valid except at the root of the search
 	CbfsNodeData* myNodeData = (CbfsNodeData*)getNodeData();
@@ -447,13 +462,6 @@ void CbfsBranchCallback::main()
 		if (!myNodeData)
 			fprintf(mJsonFile, "\"contour\": 0, ");
 	}
-
-	// Update lower bound and upper bound, and update contour if necessary
-	double incumVal = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
-	double bestObj = getBestObjValue();
-	double optGap = getMIPRelativeGap();
-	mCbfs->updateBounds(bestObj, incumVal, optGap);
-	if (1 == getNnodes()) mCbfs->updateContourBegin();
 
 	// Loop through all of the branches produced by CPLEX
 	for (int i = 0; i < getNbranches(); ++i)
