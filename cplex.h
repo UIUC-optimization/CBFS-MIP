@@ -20,7 +20,7 @@ using namespace std;
 
 class CbfsNodeData;
 typedef IloCplex::MIPCallbackI::NodeId NID;
-typedef multimap<double, NID> CbfsHeap;
+typedef multimap<double, CbfsNodeData*> CbfsHeap;
 typedef map<int, CbfsHeap> ContourMap;
 typedef map<int, pair<int,int>> RangeMap;
 typedef list<CbfsNodeData*> CbfsDive;
@@ -49,6 +49,7 @@ public:
 	void updateContScores(int contID, int score);
 	void updateBounds(double lb, double ub, double gap);
 	void probStep();
+	void printScores();
 	int calContour(CbfsNodeData* nodeData);
 
 	NID getNextNode();
@@ -76,6 +77,9 @@ private:
 	int mDiveCount, mDiveStart, mMaxDepth, mProbStep, mProbInterval; // Diving and Probing parameters
 	int mNIntVars, mNInfeasibleCont;								 // Infeasible variable contour parameters
 	bool mDiveStatus, mProbStatus;									 // Diving and Probing triggers
+
+	int preNodeID;
+	double preNodeLB;
 
 	vector<int> mContScores;
 };

@@ -131,8 +131,6 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 	//Store diving candidate if diving is on
 	if (mDiveStatus) {
 		mDiveCand.push_back(nodeData);
-		if (mDiveCount == 0)
-			mDiveStart = mCurrContour->first;		// record contour number of the dive start node
 	}
 
 	// TODO - should we use estimate or lower bound here?  I think estimate's the right thing, but
@@ -158,7 +156,7 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 			break;
 	}
 	// The contour heap now store pointers to the nodeData instances, instead of NID. Below, changes are made accordingly.
-	mContours[nodeData->contour].insert({best, nodeData->id});
+	mContours[nodeData->contour].insert({best, nodeData});
 }
 
 void CbfsData::delNode(CbfsNodeData* nodeData)
@@ -199,7 +197,7 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 	for (auto i = range.first; i != range.second; ++i)
 	{
 		// pointers to nodeData are stored in contour heap
-		if (i->second == nodeData->id) 
+		if (i->second->id == nodeData->id) 
 		{ 
 			mContours[nodeData->contour].erase(i); 
 			break;
@@ -238,6 +236,12 @@ NID CbfsData::getNextNode()
 		mDiveCand.clear();
 		if (mProbStep != 2) mDiveCount++;                     // Avoid an extra depth update when probing
 		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
+		else {
+			// If no change in relaxed solution, terminate diving with probability
+			//int rnum = rand() % mMaxDepth;
+			//if (mDiveCand.front()->lpval == preNodeLB && mDiveCount > rnum)
+			//	mDiveStatus = false;
+		}
 		return id;
 	}
 	// Hhandle empty successor list mid-probing
@@ -268,25 +272,50 @@ NID CbfsData::getNextNode()
 	// If the heap has a non-empty contour, return the best thing in that contour
 	// pointers to nodeData are stored in contour heap
 	if (mCurrContour != mContours.end()) {
+
 		/* Implement tie breaking rules */
 		double search = mCurrContour->second.begin()->first;
 		auto range = mCurrContour->second.equal_range(search);
 		switch (mTieBreak)
 		{
 		case FIFO:
-			id = range.first->second;
+			id = range.first->second->id;
 			break;
 		case LIFO:
-			id = (--range.second)->second;
+			id = (--range.second)->second->id;
 			break;
 		case OG:
-			id = mCurrContour->second.begin()->second;
+			id = mCurrContour->second.begin()->second->id;
 			break;
 		default:
-			id = mCurrContour->second.begin()->second;
+			id = mCurrContour->second.begin()->second->id;
 			break;
 		}
 		//id = mCurrContour->second.begin()->second;
+
+		// Penalized deviating from path (only works with minimizing and only with best-estimate search)
+		//if (mCurrContour == mContours.begin())
+		//double minPSearch = INFINITY;
+		//double curPSearch;
+		//NID minID;
+		//// Define penalty for deviating
+		//double penalty = 0.05;
+		//if (bestUB != INFINITY)
+		//	penalty = mReOptGap / 2;
+
+		//for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
+		//{
+		//	if (preNodeID = iter->second->parent)
+		//		curPSearch = iter->second->estimate;
+		//	else
+		//		curPSearch = iter->second->estimate + penalty * fabs(iter->second->estimate);
+		//	if (curPSearch < minPSearch)
+		//	{
+		//		minPSearch = curPSearch;
+		//		minID = iter->second->id;
+		//	}
+		//}
+		//id = minID;
 	}
 
 	// There should always be a next node when we call this
@@ -298,6 +327,12 @@ NID CbfsData::getNextNode()
 			printf("Contour %d has size %ld\n", i->first, i->second.size());
 		throw ERROR << "Node ID should not be -1!";
 	}
+
+	if (mDiveStatus) {
+		mDiveStart = mCurrContour->first;		// record contour number of the dive start node
+		preNodeLB = -INFINITY;
+	}
+		
 
 	return id;
 }
@@ -382,6 +417,8 @@ int CbfsData::calContour(CbfsNodeData* nodeData)
 		{
 			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mContPara)));
 		}
+		if (contour > (mContPara - 1))
+			contour = mContPara - 1;
 		/*************************************/
 		// When new non-empty contour appears, update corresponding score
 		//TODO: Use a separate function for contour score updates
@@ -422,6 +459,14 @@ void CbfsData::probStep()
 	}
 }
 
+void CbfsData::printScores()
+{
+	printf("Scores: ");
+	for (int i = 0; i < mContScores.size(); i++)
+		printf("%d ", mContScores[i]);
+	printf("\n");
+}
+
 // Do branching and store the generated nodes
 void CbfsBranchCallback::main()
 {
@@ -445,6 +490,7 @@ void CbfsBranchCallback::main()
 			int curSol = getObjValue();
 			if (ub != INFINITY && ub > curSol)
 				mCbfs->updateContScores();
+			//mCbfs->printScores();
 		}
 		prune();
 		return;
