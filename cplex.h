@@ -62,6 +62,8 @@ public:
 	void setBestUB(double ub) { bestUB = ub; }
 	void setNumIterations(long i) { nIters = i; }
 	void updateContourBegin() { mCurrContour = mContours.begin(); }
+	void getVarArray(IloNumVarArray input) { mAllVars = input; }
+	void getCountVar(int input) { mNVars = input; }
 
 private:
 	Mode mMode;
@@ -74,14 +76,15 @@ private:
 	ContourMap::iterator mCurrContour;
 	CbfsDive mDiveCand, mProbLeft, mProbRight, mProbPre;
 	int mMob, mContPara;
-	int mDiveCount, mDiveStart, mMaxDepth, mProbStep, mProbInterval; // Diving and Probing parameters
-	int mNIntVars, mNInfeasibleCont;								 // Infeasible variable contour parameters
-	bool mDiveStatus, mProbStatus;									 // Diving and Probing triggers
+	int mDiveCount, mDiveStart, mMaxDepth, mProbStep, mProbInterval;  // Diving and Probing parameters
+	bool mDiveStatus, mProbStatus;									  // Diving and Probing triggers
 
 	int preNodeID;
 	double preNodeLB;
 
+	int mNVars;														  // Num of Decision Variables
 	vector<int> mContScores;
+	IloNumVarArray mAllVars;
 };
 
 class Cplex
@@ -92,6 +95,7 @@ public:
 
 	void solve();
 	IloObjective::Sense getSense() { return mObj.getSense(); }
+	IloNumVarArray getVars();
 
 private:
 	IloEnv mEnv;
@@ -101,6 +105,7 @@ private:
 
 	FILE* mJsonFile;
 
+	int countVars;
 };
 
 class CbfsBranchCallback : public IloCplex::BranchCallbackI

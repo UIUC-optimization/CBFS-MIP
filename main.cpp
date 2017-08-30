@@ -94,9 +94,6 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 		case 'l':
 			options.cPara = atoi(optarg);
 			break;
-		case 'n':
-			options.m = NInfCont;
-			break;
 		case 'd':
 			options.maxDepth = atoi(optarg);
 			break;

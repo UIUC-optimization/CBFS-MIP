@@ -46,7 +46,6 @@ static const char* optStrings[][3] =
 {
 	{BOOL, "C", "Cplex only (no CBFS)"},
 	{BOOL, "L", "LBContour (default 50)"},
-	{BOOL, "n", "Infeasible variable contour (Disabled)"},
 	{BOOL, "D", "Disable callbacks entirely (default)"},
 	{BOOL, "b", "Use no contours (BFS)"},
 	{BOOL, "w", "Use weighted contour rule (default pw = 1, nw = 1)"},

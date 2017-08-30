@@ -40,6 +40,10 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 		mCplex.use(new (mEnv) CbfsBranchCallback(mEnv, cbfs, mJsonFile));  //IloCplex::BranchCallbackI::CbfsBranchCallback
 		mCplex.use(new (mEnv) CbfsNodeCallback(mEnv, cbfs));               //IloCplex::NodeCallbackI::CbfsNodeCallback
 	}
+
+	// Storing decision variables info in cbfs
+	cbfs->getVarArray(getVars());
+	cbfs->getCountVar(countVars);
 }
 
 // Use CPLEX to solve the problem
@@ -119,6 +123,34 @@ void Cplex::solve()
 			status, mCplex.getNnodes(), elapsed);
 	}
 
+}
+
+// Attempt to extract integer variables from CPLEX model
+IloNumVarArray Cplex::getVars() {
+	IloModel::Iterator iter(mModel);
+	unordered_set<int> vars;
+	IloNumVarArray allVars(mEnv);
+	int count = 0;
+	IloExpr expr;
+	// Extract all variables and store all integer variables
+	while (iter.ok()) {
+		IloExtractable extr = *iter;
+		if (extr.isVariable()) {
+			IloNumVar temp = extr.asVariable();
+			//if (temp.getType() != 2) {
+				vars.insert(temp.getId());
+				if (vars.size() > count) {
+					allVars.add(temp);
+					++count;
+				}
+				//printf("Variable detected. %d\n", count);
+			//}
+		}
+		++iter;
+	}
+	//printf("Count %d variables in total.\n", count);
+	countVars = count;
+	return allVars;
 }
 
 // Compute the contour that a new node belongs to, and add it to the data structure
@@ -238,9 +270,10 @@ NID CbfsData::getNextNode()
 		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
 		else {
 			// If no change in relaxed solution, terminate diving with probability
-			//int rnum = rand() % mMaxDepth;
-			//if (mDiveCand.front()->lpval == preNodeLB && mDiveCount > rnum)
-			//	mDiveStatus = false;
+			int rnum = rand() % mMaxDepth;
+			if (mDiveCand.front()->lpval == preNodeLB && mDiveCount > rnum)
+				mDiveStatus = false;
+			preNodeLB = mDiveCand.front()->lpval;
 		}
 		return id;
 	}
@@ -294,28 +327,32 @@ NID CbfsData::getNextNode()
 		//id = mCurrContour->second.begin()->second;
 
 		// Penalized deviating from path (only works with minimizing and only with best-estimate search)
-		//if (mCurrContour == mContours.begin())
-		//double minPSearch = INFINITY;
-		//double curPSearch;
-		//NID minID;
-		//// Define penalty for deviating
-		//double penalty = 0.05;
-		//if (bestUB != INFINITY)
-		//	penalty = mReOptGap / 2;
+		if (mMaxDepth <= 0) {
+			if (mCurrContour != mContours.begin()) {
+				double minPSearch = INFINITY;
+				double curPSearch;
+				NID minID;
+				// Define penalty for deviating
+				double penalty = 1;
+				if (bestUB != INFINITY)
+					penalty = mReOptGap / 2;
 
-		//for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
-		//{
-		//	if (preNodeID = iter->second->parent)
-		//		curPSearch = iter->second->estimate;
-		//	else
-		//		curPSearch = iter->second->estimate + penalty * fabs(iter->second->estimate);
-		//	if (curPSearch < minPSearch)
-		//	{
-		//		minPSearch = curPSearch;
-		//		minID = iter->second->id;
-		//	}
-		//}
-		//id = minID;
+				minID = mCurrContour->second.begin()->second->id;
+				for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
+				{
+					if (preNodeID == iter->second->parent)
+						curPSearch = iter->second->estimate;
+					else
+						curPSearch = iter->second->estimate + penalty * fabs(iter->second->estimate);
+					if (curPSearch < minPSearch)
+					{
+						minPSearch = curPSearch;
+						minID = iter->second->id;
+					}
+				}
+				id = minID;
+			}
+		}
 	}
 
 	// There should always be a next node when we call this
@@ -331,8 +368,8 @@ NID CbfsData::getNextNode()
 	if (mDiveStatus) {
 		mDiveStart = mCurrContour->first;		// record contour number of the dive start node
 		preNodeLB = -INFINITY;
+		preNodeID = id._id;
 	}
-		
 
 	return id;
 }
@@ -529,8 +566,8 @@ void CbfsBranchCallback::main()
 		int varId = vars[0].getId();
 
 		// Output
-		if (i == 0 && mJsonFile)
-			fprintf(mJsonFile, "\"branching_var\": \"%s\"}\n", vars[0].getName());
+		//if (i == 0 && mJsonFile)
+		//	fprintf(mJsonFile, "\"branching_var\": \"%s\"}\n", vars[0].getName());
 
 		// Populate the CbfsNodeData structure corresponding to the new branch
 		CbfsNodeData* newNodeData;
