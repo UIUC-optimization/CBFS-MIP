@@ -29,17 +29,41 @@ struct opts;
 class CbfsData
 {
 public:
-	CbfsData(Mode m, double posW, double nullW, int mob, int cPara, int maxDepth, int probInterval) : 
+	CbfsData(Mode m, double posW, double nullW, int mob, int lbPara, int maxDepth, int probInterval, int term) : 
 		mMode(m), mPosW(posW), mNullW(nullW), bestLB(-INFINITY), bestUB(INFINITY), nIters(0),
-		mCurrContour(mContours.begin()), mMob(mob), mContPara(cPara), mDiveCount(0), mDiveStart(0),
-		mMaxDepth(maxDepth), mProbStep(0), mProbInterval(probInterval)
+		mCurrContour(mContours.begin()), mMob(mob), mLBContPara(lbPara),
+		mDiveMaxDepth(maxDepth), mProbInterval(probInterval),
+		earlyTermIter(term)
 	{
-		mDiveStatus = (maxDepth > 0) ? true : false;
-		mProbStatus = (probInterval > 0) ? true : false;
-		mNInfeasibleCont = 20;
-		mContScores.resize(cPara, 0);
+		// WRA Contour Score Matrix Initialization
+		mContScores.resize(lbPara, 0);
+		// Tie-breaking Rule Initialization
 		mTieBreak = OG;
-		srand(time(0)); // Randomness is used in random contour
+		// Dive Initialization
+		mDiveStatus = (maxDepth > 0) ? true : false;
+		// Check if use CPLEX Dive
+		mUseCplexDive = (maxDepth == -1) ? true : false;
+		preId = prepreId = 0;
+
+		mNumDive = 0; mBFSInterval = 1000; mDiveMinDepth = 0;
+		mCurDiveCount = mDiveStartCont = 0;
+		mDiveTol = 0.25; mExpdMaxDepth = 0;
+		// Prob Initialization
+		mProbStatus = (probInterval > 0) ? true : false;
+		mProbStep = mPreProbEnd = 0;
+		// Set random seed for CBFS
+		srand(time(0));
+		// EXPERIMENT: Hybrid Best Parameter
+		mHybridBestPara = 0.1;
+		// EXPERIMENT: Dive Contour
+		mDiveContPara = 200;
+		prtIDLstInstedNode = -1;
+		penaltyPara = 1; penaltyOn = false;
+		// EXPERIMENT: Early Termination
+		mNumIntInfsblUnexpl = mSumIntInfsblUnexpl = 0;
+		mEarlyTermOn = (earlyTermIter > 0) ? true : false;
+		//geoMeanShift = 1;
+		
 	}
 	~CbfsData();
 
@@ -48,11 +72,17 @@ public:
 	void updateContScores();
 	void updateContScores(int contID, int score);
 	void updateBounds(double lb, double ub, double gap);
+	void updateExpdMaxDepth(int depth);
 	void probStep();
+	void terminateProb();
 	void printScores();
+	void printCriteria();
 	int calContour(CbfsNodeData* nodeData);
+	int getNumNodesInCont(int contID);
 
 	NID getNextNode();
+	NID getNextNodePenalty();
+	NID getNextNodeBFS();
 	ContourMap::iterator getNextCont();
 
 	Mode getMode() { return mMode; }
@@ -62,8 +92,28 @@ public:
 	void setBestUB(double ub) { bestUB = ub; }
 	void setNumIterations(long i) { nIters = i; }
 	void updateContourBegin() { mCurrContour = mContours.begin(); }
-	void getVarArray(IloNumVarArray input) { mAllVars = input; }
-	void getCountVar(int input) { mNVars = input; }
+
+	// EXPERIMENT: Early termination and criteria for best contour strategy
+	void calCriteria();
+	bool isEarlyTermOn() { return mEarlyTermOn; }
+	bool isEarlyTermToStart() { return (nIters == earlyTermIter); }
+	void setVarArray(IloNumVarArray input) { mAllVars = input; }
+	void setIntVarArray(IloNumVarArray input) { mAllIntVars = input; }
+	void setVarCount(int input) { mNVars = input; }
+	void setIntVarCount(int input) { mNIntVars = input; }
+	void setDiveMaxDepth(int input) { mDiveMaxDepth = input; }
+	void setRootLB(double lb) { rootLB = lb; }
+	void setSplxIterInfo(int numSplxIter) { mSumIterSplx = numSplxIter; }
+	void setJsonFile(FILE* json) { mJsonFile = json; }
+	void setRootTime() { clock_gettime(CLOCK_MONOTONIC, &mRoot); }
+	timespec getRootTime() { return mRoot; }
+	IloNumVarArray getIntVarArray() { return mAllIntVars; }
+	CbfsDive rcntAddedNodes;
+
+	// EXPERIMENT: Use CPLEX Dive
+	bool isCplexDiveOn() { return mUseCplexDive; }
+	bool isInSameDive(int id);
+	void updateDivePre(int id);
 
 private:
 	Mode mMode;
@@ -74,28 +124,61 @@ private:
 
 	ContourMap mContours;
 	ContourMap::iterator mCurrContour;
-	CbfsDive mDiveCand, mProbLeft, mProbRight, mProbPre;
-	int mMob, mContPara;
-	int mDiveCount, mDiveStart, mMaxDepth, mProbStep, mProbInterval;  // Diving and Probing parameters
-	bool mDiveStatus, mProbStatus;									  // Diving and Probing triggers
-
-	int preNodeID;
-	double preNodeLB;
-
-	int mNVars;														  // Num of Decision Variables
+	CbfsDive mDiveCand, mProbOneSide, mProbCand;
+	int mMob, mLBContPara;
+	int mNumDive, mBFSInterval;
+	int mCurDiveCount, mDiveStartCont;										// Diving parameters
+	int mDiveMinDepth, mDiveMaxDepth;										
+	double mDiveTol;
+	int mProbStep, mProbInterval, mPreProbEnd;								// Probing parameters
+	bool mDiveStatus, mProbStatus;											// Diving and Probing flags
 	vector<int> mContScores;
-	IloNumVarArray mAllVars;
+
+	// EXPERIMENT: Dive contour, deviating path penalty
+	int mDiveContPara, prtIDLstInstedNode;
+	int preNodeID, preContID;												// ID of the node explored just prior to current one
+	double preNodeLB, penaltyPara;
+	bool penaltyOn;
+
+	// EXPERIMENT: Hybrid estimate and value
+	double mHybridBestPara;
+
+	// Record the maximum depth in current run
+	int mExpdMaxDepth;
+
+	// EXPERIMENT: Early termination and criteria for best contour strategy
+	bool mEarlyTermOn;
+	int earlyTermIter;
+	double rootLB;
+	//double geoMeanShift;
+	int mNumUnexplNodes;													// Criteria 1: Number of unexplored nodes
+	double mLbImprv;														// Criteria 2: LB percentage improvement from root LB
+	int mNumIntInfsblUnexpl;												// Criteria 3: Sum of number of integer-infeasible variables of unexplored ndoes
+	int mSumDpthUnexpl;														// Criteria 4: Sum of depth of unexplored nodes
+	double mSumIntInfsblUnexpl;												// Criteria 5: Sum of integer infeasibilites of unexplored ndoes
+	int mSumIterSplx;														// Criteria 8: Sum of simplex iterations
+	int mNVars, mNIntVars;													// Num of Decision Variables
+	timespec mRoot;
+
+	// Use CPLEX Dive
+	bool mUseCplexDive;
+	int preId, prepreId;
+
+	IloNumVarArray mAllVars, mAllIntVars;
+
+	FILE* mJsonFile;
 };
 
 class Cplex
 {
 public:
 	Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit, 
-			bool disableAdvStart, int rand);
+			bool disableAdvStart, int rand, bool jsonDetail);
 
 	void solve();
 	IloObjective::Sense getSense() { return mObj.getSense(); }
 	IloNumVarArray getVars();
+	IloNumVarArray getIntVars();
 
 private:
 	IloEnv mEnv;
@@ -104,15 +187,19 @@ private:
 	IloObjective mObj;
 
 	FILE* mJsonFile;
+	bool mJsonDetail;
 
-	int countVars;
+	int varsCount;
+	int intVarsCount;
+	
+	CbfsData* mCbfs;
 };
 
 class CbfsBranchCallback : public IloCplex::BranchCallbackI
 {
 public:
-	CbfsBranchCallback(IloEnv env, CbfsData* cbfs, FILE* jsonFile) : 
-		IloCplex::BranchCallbackI(env), mCbfs(cbfs), mJsonFile(jsonFile) { }
+	CbfsBranchCallback(IloEnv env, CbfsData* cbfs, FILE* jsonFile, bool jsonDetail) : 
+		IloCplex::BranchCallbackI(env), mCbfs(cbfs), mJsonFile(jsonFile), mJsonDetail(jsonDetail) { }
 	IloCplex::CallbackI* duplicateCallback() const 
 		{ return (new (getEnv()) CbfsBranchCallback(*this)); }
 	void main();
@@ -120,6 +207,8 @@ public:
 private:
 	CbfsData* mCbfs;
 	FILE* mJsonFile;
+	bool mJsonDetail;
+	IloArray<IloCplex::ControlCallbackI::IntegerFeasibility> varsFeasibility;
 };
 
 class CbfsNodeCallback : public IloCplex::NodeCallbackI
@@ -147,12 +236,16 @@ public:
 	int parent;
 	bool explored;
 
-	CbfsNodeData(CbfsData* cbfs, FILE* jsonFile) : 
-		explored(false), mCbfs(cbfs), mJsonFile(jsonFile) {}
+	int infNum;
+	double infSum;
+
+	CbfsNodeData(CbfsData* cbfs, FILE* jsonFile, bool jsonDetail) : 
+		explored(false), mCbfs(cbfs), mJsonFile(jsonFile), mJsonDetail(jsonDetail) {}
 	~CbfsNodeData();
 
 private:
 	CbfsData* mCbfs;
 	FILE* mJsonFile;
+	bool mJsonDetail;
 };
 #endif // CPLEX_H

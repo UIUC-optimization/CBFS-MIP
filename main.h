@@ -40,6 +40,8 @@ struct opts
 	int maxDepth;
 	int probInterval;
 	int randSeed;
+	int earlyTerm;
+	bool jsDetail;
 };
 
 static const char* optStrings[][3] =
@@ -50,7 +52,8 @@ static const char* optStrings[][3] =
 	{BOOL, "b", "Use no contours (BFS)"},
 	{BOOL, "w", "Use weighted contour rule (default pw = 1, nw = 1)"},
 	{BOOL, "W", "Disable warm starts and cut generation"},
-	{BOOL, "R", "Use random contour" },
+	{BOOL, "R", "Use random contour"},
+	{BOOL, "A", "JSON output details of iterations"},
 	{ARG, "d", "Use diving heuristic, set maximum diving depth"},
 	{ARG, "p", "Take probing step during diving, set probing interval"},
 	{ARG, "r", "Set random seed for CPLEX"},
@@ -62,6 +65,7 @@ static const char* optStrings[][3] =
 	{ARG, "P", "Weight for the positive assignments"},
 	{ARG, "N", "Weight for the null assignments"},
 	{ARG, "j", "JSON output file"},
+	{ARG, "E", "Set iteration for early termination"},
 	{SEP, "", ""},
 	{BOOL, "h", "Help"}
 };

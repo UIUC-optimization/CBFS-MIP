@@ -1,14 +1,16 @@
 // cplex.cpp: David R. Morrison, Aug. 2013
+//            Wenda Zhang, 2015 - 
 // Implementation of the CPLEX wrapper for CBFS on MIPs
 
 #include "cplex.h"
 
 // Import the model and set up the CPLEX solver
 Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit, 
-		bool disableAdvStart, int rand) :
+		bool disableAdvStart, int rand, bool jsonDetail) :
 	mModel(mEnv),    //Initialize model
 	mCplex(mEnv),    //Initialize algorithm(These two require enverioment instance mEnv to initialize)
-	mJsonFile(jsonFile)
+	mJsonFile(jsonFile),
+	mJsonDetail(jsonDetail)
 {
 	// Import the model
 	mCplex.importModel(mModel, filename);   //Import model from file "filename"
@@ -37,20 +39,26 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 	// Initialize callbacks for branching and node selection
 	if (cbfs->getMode() != Disable)
 	{
-		mCplex.use(new (mEnv) CbfsBranchCallback(mEnv, cbfs, mJsonFile));  //IloCplex::BranchCallbackI::CbfsBranchCallback
+		mCplex.use(new (mEnv) CbfsBranchCallback(mEnv, cbfs, mJsonFile, mJsonDetail));  //IloCplex::BranchCallbackI::CbfsBranchCallback
 		mCplex.use(new (mEnv) CbfsNodeCallback(mEnv, cbfs));               //IloCplex::NodeCallbackI::CbfsNodeCallback
 	}
 
 	// Storing decision variables info in cbfs
-	cbfs->getVarArray(getVars());
-	cbfs->getCountVar(countVars);
+	//cbfs->setVarArray(getVars());
+	//cbfs->setVarCount(varsCount);
+	// Storing integer variables info in cbfs
+	//cbfs->setIntVarArray(getIntVars());
+	//cbfs->setIntVarCount(intVarsCount);
+	//cbfs->setDiveMaxDepth(countVars);
+	cbfs->setJsonFile(mJsonFile);
+	mCbfs = cbfs;
 }
 
 // Use CPLEX to solve the problem
 void Cplex::solve() 
 { 
 	// Write output about solution procedure to JSON file
-	if (mJsonFile) 
+	if (mJsonFile && mJsonDetail) 
 	{
 		fprintf(mJsonFile, "{\"start_time\": %ld, \"clocks_per_sec\": %ld, "
 			"\"num_vars\": %ld, \"num_int_vars\": %ld, \"num_bin_vars\": %ld}\n", 
@@ -65,6 +73,8 @@ void Cplex::solve()
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	double elapsed = (end.tv_sec - start.tv_sec);
 	elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+	double elpToRoot = (mCbfs->getRootTime()).tv_sec - start.tv_sec;
+	elpToRoot += ((mCbfs->getRootTime()).tv_nsec - start.tv_nsec) / 1000000000.0;
 
 	printf("DATA_START\n{\n");
 
@@ -116,41 +126,82 @@ void Cplex::solve()
 	if (mJsonFile) 
 	{
 		if (status != IloCplex::Infeasible)
-		    fprintf(mJsonFile, "{\"cpl_status\": %d, \"obj_value\": %0.2f, \"opt_gap\": %0.2f, \"nodes_to_best\": %d, \"total_nodes\": %ld, \"end_time\": %0.2f}\n", 
-			status, mCplex.getObjValue(), mCplex.getMIPRelativeGap(), mCplex.getIncumbentNode(), mCplex.getNnodes(), elapsed);
+		{
+			fprintf(mJsonFile, "{\"cpl_status\": %d, ", status);
+			fprintf(mJsonFile, "\"obj_value\": "); try { fprintf(mJsonFile, "%0.2f, \"opt_gap\": %0.2f, \"nodes_to_best\": %d, ", 
+																mCplex.getObjValue(), mCplex.getMIPRelativeGap(), mCplex.getIncumbentNode()); }
+			catch (const IloCplex::Exception& e) { fprintf(mJsonFile, "inf, "); }
+			fprintf(mJsonFile, "\"total_nodes\": %ld, \"end_time\": %0.2f, \"num_vars\": %d, ", mCplex.getNnodes(), elapsed, mCplex.getNintVars());
+			fprintf(mJsonFile, "\"root_time\": %0.2f}\n", elpToRoot);
+		}
 		else
-			fprintf(mJsonFile, "{\"cpl_status\": %d, \"total_nodes\": %ld, \"end_time\": %0.2f}\n",
-			status, mCplex.getNnodes(), elapsed);
+			fprintf(mJsonFile, "{\"cpl_status\": %d, \"total_nodes\": %ld, \"end_time\": %0.2f, \"num_vars\": %d, \"root_time\": %0.2f}\n",
+			status, mCplex.getNnodes(), elapsed, mCplex.getNintVars(), elpToRoot);
 	}
 
 }
 
-// Attempt to extract integer variables from CPLEX model
-IloNumVarArray Cplex::getVars() {
+// Attempt to extract all variables from CPLEX model
+IloNumVarArray Cplex::getVars() 
+{
 	IloModel::Iterator iter(mModel);
 	unordered_set<int> vars;
 	IloNumVarArray allVars(mEnv);
 	int count = 0;
 	IloExpr expr;
 	// Extract all variables and store all integer variables
-	while (iter.ok()) {
+	while (iter.ok()) 
+	{
 		IloExtractable extr = *iter;
-		if (extr.isVariable()) {
+		if (extr.isVariable()) 
+		{
 			IloNumVar temp = extr.asVariable();
-			//if (temp.getType() != 2) {
-				vars.insert(temp.getId());
-				if (vars.size() > count) {
-					allVars.add(temp);
-					++count;
-				}
-				//printf("Variable detected. %d\n", count);
-			//}
+			vars.insert(temp.getId());
+			if (vars.size() > count) 
+			{
+				allVars.add(temp);
+				++count;
+			}
+			//printf("Variable detected. %d\n", count);
 		}
 		++iter;
 	}
 	//printf("Count %d variables in total.\n", count);
-	countVars = count;
+	varsCount = count;
 	return allVars;
+}
+
+// Attempt to extract integer variables from CPLEX model
+IloNumVarArray Cplex::getIntVars()
+{
+	IloModel::Iterator iter(mModel);
+	unordered_set<int> vars;
+	IloNumVarArray allIntVars(mEnv);
+	int count = 0;
+	IloExpr expr;
+	// Extract all variables and store all integer variables
+	while (iter.ok())
+	{
+		IloExtractable extr = *iter;
+		if (extr.isVariable())
+		{
+			IloNumVar temp = extr.asVariable();
+			if (temp.getType() != 2)
+			{
+				vars.insert(temp.getId());
+				if (vars.size() > count)
+				{
+					allIntVars.add(temp);
+					++count;
+				}
+			}
+			//printf("Variable detected. %d\n", count);
+		}
+		++iter;
+	}
+	//printf("Count %d variables in total.\n", count);
+	intVarsCount = count;
+	return allIntVars;
 }
 
 // Compute the contour that a new node belongs to, and add it to the data structure
@@ -160,14 +211,15 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 	// Compute the contour for the node
 	nodeData->contour = calContour(nodeData);
 
-	//Store diving candidate if diving is on
-	if (mDiveStatus) {
+	// Store diving candidate if diving is on
+	if (mDiveStatus) 
 		mDiveCand.push_back(nodeData);
-	}
 
-	// TODO - should we use estimate or lower bound here?  I think estimate's the right thing, but
-	// I'm not 100% sure of this.  We should try the other as well
-	// Here we could try to use lower bound as a measure of best 
+	// Store the recently added nodes
+	if (mEarlyTermOn)
+		rcntAddedNodes.push_back(nodeData);
+
+	// 1,2: Best Estimate/LB; 3,4: Worst Estimate/LB; 5: hybrid between Best Estimate and LB
 	double best;
 	switch (mMob)
 	{
@@ -183,25 +235,51 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 		case 4:
 			best = (mSense == IloObjective::Maximize) ? -nodeData->lpval : nodeData->lpval;
 			break;
+		case 5:
+			best = nodeData->estimate * mHybridBestPara + nodeData->lpval * (1 - mHybridBestPara);
+			best = (mSense == IloObjective::Maximize) ? -best : best;
+			break;
 		default:
 			best = (mSense == IloObjective::Maximize) ? -nodeData->estimate : nodeData->estimate;
 			break;
 	}
-	// The contour heap now store pointers to the nodeData instances, instead of NID. Below, changes are made accordingly.
+	// The contour heap now store pointers to the nodeData instances, instead of NID.
 	mContours[nodeData->contour].insert({best, nodeData});
 }
 
 void CbfsData::delNode(CbfsNodeData* nodeData)
 {
-	//If mDiveCand has elements, then first see if node to be deleted is in here.
+	// If mDiveCand has elements, see if node to be deleted is there
 	if (!mDiveCand.empty())
 	{
+		if (mDiveCand.size() > 2) throw ERROR << "More than 2 elements in mDiveCand.";
 		if (nodeData->id == mDiveCand.front()->id) mDiveCand.pop_front();
 		else if (nodeData->id == mDiveCand.back()->id) mDiveCand.pop_back();
-		if (mDiveCand.size() > 2) throw ERROR << "More than 2 elements in mDiveCand.";
+	}
+	// If during probing, then check stored probing nodes
+	if (mProbStep == 1 && !mProbCand.empty())
+	{
+		if (mProbCand.front()->id == nodeData->id) mProbCand.clear();
+	}
+	else if (mProbStep == 2 && !mProbOneSide.empty())
+	{
+		if (mProbOneSide.front()->id == nodeData->id) mProbOneSide.pop_front();
+		else if (mProbOneSide.back()->id == nodeData->id) mProbOneSide.pop_back();
+	}
+	// If early termination info recording is on, then update infeasibility info
+	if (mEarlyTermOn)
+	{
+		// If rcntAddedNodes has elements, see if node to be deleted is there
+		if (!rcntAddedNodes.empty())
+		{
+			if (rcntAddedNodes.size() > 2) throw ERROR << "More than 2 elements in rcntAddedNodes.";
+			if (nodeData->id == rcntAddedNodes.front()->id) rcntAddedNodes.pop_front();
+			else if (nodeData->id == rcntAddedNodes.back()->id) rcntAddedNodes.pop_back();
+		}
 	}
 	// Look up the node by the measure of best key
 	double search;
+	// 1,2: Best Estimate/LB; 3,4: Worst Estimate/LB; 5: hybrid between Best Estimate and LB
 	switch (mMob)
 	{
 		case 1: 
@@ -215,6 +293,10 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 			break;
 		case 4:
 			search = (mSense == IloObjective::Maximize) ? -nodeData->lpval : nodeData->lpval;
+			break;
+		case 5:
+			search = nodeData->estimate * mHybridBestPara + nodeData->lpval * (1 - mHybridBestPara);
+			search = (mSense == IloObjective::Maximize) ? -search : search;
 			break;
 		default:
 			search = (mSense == IloObjective::Maximize) ? -nodeData->estimate : nodeData->estimate;
@@ -240,7 +322,7 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 	if (mContours[nodeData->contour].empty())
 	{
 		/*************************************/
-		// When contour becores empty, clear corresponding score
+		// When contour becomes empty, clear corresponding score
 		//TODO: Use a separate function for contour score updates
 		updateContScores(nodeData->contour, 0);
 		/*************************************/
@@ -253,60 +335,81 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 		}
 		mContours.erase(nodeData->contour);
 	}
+
+	// Update the max depth of processed nodes
+	updateExpdMaxDepth(nodeData->depth);
 }
 
 // Select the next node to explore from the CBFS data structure
 NID CbfsData::getNextNode()
 {
 	NID id; id._id = -1;
+
 	if (!mDiveCand.empty())
 	{
 		// Perform probing either when specific condition satisfied or probing already started
-		if (mProbStep != 0 || (mDiveCount % mProbInterval == 1 && mProbStatus))
+		if (mProbStep != 0 || (mProbStatus && (mCurDiveCount == 0 
+						   || (mCurDiveCount - mPreProbEnd) == mProbInterval)))
 			probStep();
-		id = mDiveCand.front()->id;
+		if (mProbStep != 2) mCurDiveCount++;							// Avoid an extra depth update when probing
+
+		CbfsNodeData* diveNode = mDiveCand.front();
+		id = diveNode->id;
 		mDiveCand.clear();
-		if (mProbStep != 2) mDiveCount++;                     // Avoid an extra depth update when probing
-		if (mDiveCount >= mMaxDepth) mDiveStatus = false;     // If maximal depth of a dive is reached, then stop.
-		else {
+
+		if (mCurDiveCount >= mDiveMaxDepth) mDiveStatus = false;		// If maximal depth of a dive is reached, terminate current dive
+		else if (mCurDiveCount >= mDiveMinDepth && bestUB != INFINITY)
+		{
+			// If current LB too close to global UB, terminate current dive
+			if ((diveNode->lpval - bestLB) / (bestUB - bestLB) > mDiveTol) mDiveStatus = false;
 			// If no change in relaxed solution, terminate diving with probability
-			int rnum = rand() % mMaxDepth;
-			if (mDiveCand.front()->lpval == preNodeLB && mDiveCount > rnum)
-				mDiveStatus = false;
-			preNodeLB = mDiveCand.front()->lpval;
+			//int rnum = rand() % mDiveMaxDepth;
+			//if (mDiveCand.front()->lpval == preNodeLB && mDiveCount > rnum)
+			//	mDiveStatus = false;
+			//preNodeLB = mDiveCand.front()->lpval;
 		}
 		return id;
 	}
 	// Hhandle empty successor list mid-probing
 	else if (mProbStatus && mProbStep != 0)
 	{
-		if (mProbStep == 1) mDiveCand = mProbPre;
-		else mDiveCand = mProbLeft;
-		id = mDiveCand.front()->id;
-		mDiveCand.clear();
-		mDiveCount++; mProbStep = 0;
-		return id;
+		if (mProbStep == 1) mDiveCand = mProbCand;		// If child nodes of first candidate are pruned
+		else mDiveCand = mProbOneSide;
+		if (mDiveCand.empty())
+		{
+			terminateProb();
+			mCurDiveCount = 0; mPreProbEnd = 0;
+		}
+		else
+		{
+			id = mDiveCand.front()->id;
+			mDiveCand.clear();
+			terminateProb();
+			mPreProbEnd = mCurDiveCount;
+			mCurDiveCount++;
+			return id;
+		}
 	}
 	// Two possibilities for mDiveCand to be empty: 
 	// 1. maximal depth reached in last iteration
 	// 2. node in previous iteration pruned somehow
 	// mMaxDepth > 0 means diving is on, then this block enables diving for the next contour.
-	else if (mMaxDepth > 0)
+	else if (mDiveMaxDepth > 0)
 	{
-		mDiveCount = 0;
+		mCurDiveCount = 0; mPreProbEnd = 0;
 		mDiveStatus = true;
 	}
+
 	// Increment the iterator into the heap structure
 	//++mCurrContour;
 	mCurrContour = getNextCont();
 	if (mCurrContour == mContours.end())
 		mCurrContour = mContours.begin();
 
-	// If the heap has a non-empty contour, return the best thing in that contour
-	// pointers to nodeData are stored in contour heap
-	if (mCurrContour != mContours.end()) {
-
-		/* Implement tie breaking rules */
+	// Get one node from contour mCurrContour points to
+	if (mCurrContour != mContours.end()) 
+	{
+		// Tie breaking rules
 		double search = mCurrContour->second.begin()->first;
 		auto range = mCurrContour->second.equal_range(search);
 		switch (mTieBreak)
@@ -322,37 +425,11 @@ NID CbfsData::getNextNode()
 			break;
 		default:
 			id = mCurrContour->second.begin()->second->id;
-			break;
 		}
-		//id = mCurrContour->second.begin()->second;
 
-		// Penalized deviating from path (only works with minimizing and only with best-estimate search)
-		if (mMaxDepth <= 0) {
-			if (mCurrContour != mContours.begin()) {
-				double minPSearch = INFINITY;
-				double curPSearch;
-				NID minID;
-				// Define penalty for deviating
-				double penalty = 1;
-				if (bestUB != INFINITY)
-					penalty = mReOptGap / 2;
-
-				minID = mCurrContour->second.begin()->second->id;
-				for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
-				{
-					if (preNodeID == iter->second->parent)
-						curPSearch = iter->second->estimate;
-					else
-						curPSearch = iter->second->estimate + penalty * fabs(iter->second->estimate);
-					if (curPSearch < minPSearch)
-					{
-						minPSearch = curPSearch;
-						minID = iter->second->id;
-					}
-				}
-				id = minID;
-			}
-		}
+		// EXPERIMENT: Penalized deviating from path
+		if (penaltyOn && mCurrContour != mContours.begin())
+			id = getNextNodePenalty();
 	}
 
 	// There should always be a next node when we call this
@@ -365,13 +442,61 @@ NID CbfsData::getNextNode()
 		throw ERROR << "Node ID should not be -1!";
 	}
 
-	if (mDiveStatus) {
-		mDiveStart = mCurrContour->first;		// record contour number of the dive start node
+	if (mDiveStatus) 
+	{
+		mDiveStartCont = mCurrContour->first;		// record contour number of the dive start node
 		preNodeLB = -INFINITY;
-		preNodeID = id._id;
+		mNumDive++;
+		if (mNumDive % mBFSInterval == 0)
+			id = getNextNodeBFS();
 	}
+	preNodeID = id._id;
+	preContID = mCurrContour->first;
 
 	return id;
+}
+
+NID CbfsData::getNextNodeBFS()
+{
+	double minLB = mCurrContour->second.begin()->second->lpval;
+	NID minID = mCurrContour->second.begin()->second->id;
+	for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
+	{
+		if (iter->second->lpval < minLB) 
+		{
+			minLB = iter->second->lpval;
+			minID = iter->second->id;
+		}
+	}
+	return minID;
+}
+
+// EXPERIMENT: Penalized deviating from path
+// Currently only with minimizing and best-estimate search
+NID CbfsData::getNextNodePenalty()
+{
+	double minPSearch = INFINITY;
+	double curPSearch;
+	NID minID;
+	// Define penalty for deviating
+	double penalty = penaltyPara;
+	if (bestUB != INFINITY)
+		penalty = mReOptGap * penaltyPara / 2;
+
+	minID = mCurrContour->second.begin()->second->id;
+	for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
+	{
+		if (preNodeID == iter->second->parent)
+			curPSearch = iter->second->estimate;
+		else
+			curPSearch = iter->second->estimate + penalty * fabs(iter->second->estimate);
+		if (curPSearch < minPSearch)
+		{
+			minPSearch = curPSearch;
+			minID = iter->second->id;
+		}
+	}
+	return minID;
 }
 
 // Select the next contour to be explored
@@ -409,7 +534,7 @@ void CbfsData::updateContScores()
 	switch (mMode)
 	{
 	case LBContour:
-		mContScores[mDiveStart]++;
+		mContScores[mDiveStartCont]++;
 		break;
 	default:
 		break;
@@ -436,14 +561,23 @@ void CbfsData::updateBounds(double lb, double ub, double gap)
 	mReOptGap = gap;
 }
 
+void CbfsData::updateExpdMaxDepth(int depth)
+{
+	mExpdMaxDepth = (depth > mExpdMaxDepth) ? depth : mExpdMaxDepth;
+}
+
 int CbfsData::calContour(CbfsNodeData* nodeData)
 {
-	int contour;
+	int contour, numInBaseCont;
 	int lb = nodeData->lpval;
 	switch (mMode) {
+	/*----------------------------------------------------*/
+	// Assign nodes by the weight of branch on their path from root
 	case Weighted:
 		contour = mPosW * nodeData->numPos + mNullW * nodeData->numNull;
 		break;
+	/*----------------------------------------------------*/
+	// Assign nodes by their lower bound
 	case LBContour:
 		if (bestUB == INFINITY)
 		{
@@ -452,10 +586,10 @@ int CbfsData::calContour(CbfsNodeData* nodeData)
 		}
 		else
 		{
-			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mContPara)));
+			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mLBContPara)));
 		}
-		if (contour > (mContPara - 1))
-			contour = mContPara - 1;
+		if (contour > (mLBContPara - 1))
+			contour = mLBContPara - 1;
 		/*************************************/
 		// When new non-empty contour appears, update corresponding score
 		//TODO: Use a separate function for contour score updates
@@ -463,8 +597,39 @@ int CbfsData::calContour(CbfsNodeData* nodeData)
 			updateContScores(contour, 1);
 		/*************************************/
 		break;
+	/*----------------------------------------------------*/
+	// Assign randomly a contour to each node
 	case RandCont:
 		contour = rand() % 5;
+		break;
+	/*----------------------------------------------------*/
+	// Assign nodes to the next contour or the first one
+	case DiveComp:
+		numInBaseCont = getNumNodesInCont(0);
+		if (preContID < mDiveContPara && prtIDLstInstedNode != nodeData->parent)
+		{
+			// First of the two child nodes generated will go to the next contour
+			// as long as it does not exceed the contour limit
+			contour = preContID + 1;
+			prtIDLstInstedNode = nodeData->parent;
+		}
+		else
+		{
+			// Second of the two child nodes may go to the first contour or the next
+			if (preContID >= mDiveContPara / 2)
+				contour = 0;
+			else if (numInBaseCont <= mDiveContPara / 10)
+				contour = 0;
+			else
+				contour = preContID + 1;
+		}
+		break;
+	/*----------------------------------------------------*/
+	// CPLEX default node selection
+	case CplexOnly:
+		contour = -1;
+		break;
+	/*----------------------------------------------------*/
 	default:
 		contour = 0;
 	}
@@ -478,42 +643,137 @@ void CbfsData::probStep()
 	switch (mProbStep)
 	{
 	case 0:
-		mProbPre = mDiveCand;
-		mProbPre.pop_front();
+		// Store prob candidate (the remaining branch)
+		mProbCand = mDiveCand;
+		mProbCand.pop_front();
 		mProbStep = 1;
 		break;
 	case 1:
-		mProbLeft = mDiveCand;
-		mDiveCand = mProbPre;
+		if (mProbCand.empty())
+		{
+			terminateProb();
+			mPreProbEnd = mCurDiveCount;
+			break;
+		}
+		// Store child nodes from one probing candidate and direct search to the other candidate (binary branching)
+		mProbOneSide = mDiveCand;
+		mDiveCand = mProbCand;
 		mProbStep = 2;
 		break;
 	case 2:
-		if (mProbLeft.front()->estimate <= mDiveCand.front()->estimate) mDiveCand = mProbLeft;
-		mProbStep = 0;
+		if (mProbOneSide.empty()) {}
+		// Check estimate of child nodes on both candidates, choose the better one
+		else if (mProbOneSide.front()->estimate < mDiveCand.front()->estimate) mDiveCand = mProbOneSide;
+		terminateProb();
+		mPreProbEnd = mCurDiveCount;
 		break;
 	default:
 		throw ERROR << "Invalid probing parameter.";
 	}
 }
 
+void CbfsData::terminateProb()
+{
+	if (mProbStep != 0) 
+	{
+		mProbCand.clear();
+		mProbOneSide.clear();
+		mProbStep = 0;
+	}
+}
+
 void CbfsData::printScores()
 {
-	printf("Scores: ");
-	for (int i = 0; i < mContScores.size(); i++)
-		printf("%d ", mContScores[i]);
-	printf("\n");
+	if (mJsonFile)
+	{
+		if (mMode == LBContour)
+		{
+			fprintf(mJsonFile, "{ ");
+			for (int i = 0; i < mContScores.size(); i++)
+				fprintf(mJsonFile, "%d ", mContScores[i]);
+			fprintf(mJsonFile, "}\n");
+		}
+	}
+}
+
+int CbfsData::getNumNodesInCont(int contID)
+{
+	auto iter = mContours.find(contID);
+	if (iter == mContours.end())
+		return 0;
+	else
+		return iter->second.size();
+}
+
+void CbfsData::calCriteria()
+{
+	ContourMap::iterator iterCont;
+	double lbGap;
+	mNumUnexplNodes = 0;
+	mLbImprv = 1;
+	mSumDpthUnexpl = 0;
+	mNumIntInfsblUnexpl = mSumIntInfsblUnexpl = 0;
+	for (iterCont = mContours.begin(); iterCont != mContours.end(); iterCont++)
+	{
+		for (auto iterNode = iterCont->second.begin(); iterNode != iterCont->second.end(); iterNode++)
+		{
+			mNumUnexplNodes++;
+		}
+	}
+	for (iterCont = mContours.begin(); iterCont != mContours.end(); iterCont++)
+	{
+		for (auto iterNode = iterCont->second.begin(); iterNode != iterCont->second.end(); iterNode++)
+		{
+			// LB Percentage Improvement from Root LB
+			//mLbImprv *= pow((iterNode->second->lpval - rootLB) / (fabs(rootLB) + 0.0001) * 100, 1 / mNumUnexplNodes);
+			//mLbImprv *= (iterNode->second->lpval - rootLB) / (fabs(rootLB) + 0.0001) * 100;
+			lbGap = (iterNode->second->lpval - rootLB) / (fabs(rootLB) + 0.0001) * 100;
+			fprintf(mJsonFile, "%0.2f\n", lbGap);
+			mLbImprv *= lbGap;
+			//mLbImprv += (iterNode->second->lpval - rootLB) / (fabs(rootLB) + 0.0001) * 100;
+			//printf("Current mLbImprv: %0.2f, LB: %0.2f, Root: %0.2f\n", mLbImprv, iterNode->second->lpval, rootLB);
+
+			// Sum of number of integer-infeasible variables of unexplored ndoes
+			mNumIntInfsblUnexpl += iterNode->second->infNum;
+			mSumIntInfsblUnexpl += iterNode->second->infSum;
+
+			// Unexplored Nodes Depth
+			mSumDpthUnexpl += iterNode->second->depth;
+		}
+	}
+	//mLbImprv = mLbImprv / mNumUnexplNodes;
+	mLbImprv = pow(mLbImprv, 1 / mNumUnexplNodes);
+}
+
+void CbfsData::printCriteria()
+{
+	if (mJsonFile)
+	{
+		fprintf(mJsonFile, "{\"numUnexpNode\": %d, \"impvMean\": %0.2f, \"numIntInf\": %d, \"sumDepth\": %d, ", mNumUnexplNodes, mLbImprv, mNumIntInfsblUnexpl, mSumDpthUnexpl);
+		fprintf(mJsonFile, "\"sumIntInf\": %0.2f, \"bestLB\": %0.2f, \"bestUB\": %0.2f, \"numIterSplx\": %d}\n", mSumIntInfsblUnexpl, bestLB, bestUB, mSumIterSplx);
+	}
+}
+
+bool CbfsData::isInSameDive(int id)
+{
+	return ((id == preId) || (id == prepreId));
+}
+
+void CbfsData::updateDivePre(int id)
+{
+	prepreId = preId;
+	preId = id;
 }
 
 // Do branching and store the generated nodes
 void CbfsBranchCallback::main()
 {
-	mCbfs->setNumIterations(getNnodes());
 	// Output
 
 	// If there aren't any branches, just prune and return
 	if (getNbranches() == 0)
 	{
-		if (mJsonFile)
+		if (mJsonFile && mJsonDetail)
 		{
 			fprintf(mJsonFile, "{\"node_id\": %lld, \"is_int_feas\": ", getNodeId()._id);
 			if (isIntegerFeasible()) fprintf(mJsonFile, "true, ");
@@ -524,10 +784,12 @@ void CbfsBranchCallback::main()
 		if (isIntegerFeasible()) 
 		{
 			int ub = mCbfs->getBestUB();
-			int curSol = getObjValue();
-			if (ub != INFINITY && ub > curSol)
+			//int curSol = getObjValue();
+			//if (ub != INFINITY && ub > curSol)
+			if (ub != INFINITY)
 				mCbfs->updateContScores();
-			//mCbfs->printScores();
+			mCbfs->terminateProb();
+			mCbfs->printScores();
 		}
 		prune();
 		return;
@@ -538,11 +800,16 @@ void CbfsBranchCallback::main()
 	double bestObj = getBestObjValue();
 	double optGap = getMIPRelativeGap();
 	mCbfs->updateBounds(bestObj, incumVal, optGap);
-	if (1 == getNnodes()) mCbfs->updateContourBegin();
 
 	// myNodeData will be valid except at the root of the search
 	CbfsNodeData* myNodeData = (CbfsNodeData*)getNodeData();
-	if (mJsonFile)
+	if (!myNodeData)
+	{
+		mCbfs->updateContourBegin();
+		mCbfs->setRootLB(getObjValue());
+		mCbfs->setRootTime();
+	}
+	if (mJsonFile && mJsonDetail)
 	{
 		double incumbentVal = INFINITY;
 		if (hasIncumbent()) incumbentVal = getIncumbentObjValue();
@@ -566,22 +833,24 @@ void CbfsBranchCallback::main()
 		int varId = vars[0].getId();
 
 		// Output
-		//if (i == 0 && mJsonFile)
-		//	fprintf(mJsonFile, "\"branching_var\": \"%s\"}\n", vars[0].getName());
+		if (i == 0 && mJsonFile && mJsonDetail)
+			fprintf(mJsonFile, "\"branching_var\": \"%s\"}\n", vars[0].getName());
 
 		// Populate the CbfsNodeData structure corresponding to the new branch
 		CbfsNodeData* newNodeData;
 		if (myNodeData) newNodeData = new CbfsNodeData(*myNodeData);
 		else
 		{ 
-			newNodeData = new CbfsNodeData(mCbfs, mJsonFile); 
+			newNodeData = new CbfsNodeData(mCbfs, mJsonFile, mJsonDetail); 
 			newNodeData->depth = 0; newNodeData->numPos = 0; newNodeData->numNull = 0;
 			newNodeData->contour = 0; newNodeData->parent = 0;
 		}
+		newNodeData->infNum = 0; newNodeData->infSum = 0;
 		newNodeData->estimate = estimate;
 		newNodeData->lpval = getObjValue();
 		newNodeData->incumbent = hasIncumbent() ? getIncumbentObjValue() : INFINITY;
 		newNodeData->parent = getNodeId()._id;
+		//newNodeData->numInfeasibles = countInfeasibles;
 		newNodeData->depth++;
 
 		// Compute the values of the new bounds for the variable we're branching on
@@ -607,12 +876,15 @@ void CbfsBranchCallback::main()
 		newNodeData->id = makeBranch(vars, bounds, dirs, estimate, newNodeData);
 
 		// Insert the newly-created node into our CBFS data structure
-		if (mCbfs->getMode() != CplexOnly)
-			mCbfs->addNode(newNodeData);
-		else newNodeData->contour = -1;
+		//if (mCbfs->getMode() != CplexOnly)
+		//	mCbfs->addNode(newNodeData);
+		//else newNodeData->contour = -1;
+
+		// For the sake of collecting info, addNode is used with CplexOnly as well
+		mCbfs->addNode(newNodeData);
 
 		// Output
-		if (mJsonFile)
+		if (mJsonFile && mJsonDetail)
 		{
 			fprintf(mJsonFile, "{\"node_id\": %lld, \"child\": %lld, \"branch_dir\": %d, "
 				"\"estimate\": %0.2f, \"contour\": %d}\n", getNodeId()._id, newNodeData->id._id,
@@ -629,8 +901,41 @@ void CbfsNodeCallback::main()
 {
 	NID nodeId;
 	if (mCbfs->getMode() != CplexOnly)
-		nodeId = mCbfs->getNextNode();
+	{
+		if (mCbfs->isCplexDiveOn())
+		{
+			nodeId = getNodeId(0);
+			CbfsNodeData* nodeData = (CbfsNodeData*)getNodeData(nodeId);
+			if (!mCbfs->isInSameDive(nodeData->parent))
+				nodeId = mCbfs->getNextNode();
+			mCbfs->updateDivePre((nodeData->id)._id);
+		} 
+		else
+			nodeId = mCbfs->getNextNode();
+	}
 	else nodeId = getNodeId(0);
+
+	mCbfs->setNumIterations(getNnodes());
+	if (mCbfs->isEarlyTermOn())
+	{
+		while (!mCbfs->rcntAddedNodes.empty())
+		{
+			CbfsNodeData* node = mCbfs->rcntAddedNodes.front();
+			node->infNum = getNinfeasibilities(node->id);
+			node->infSum = getInfeasibilitySum(node->id);
+			mCbfs->rcntAddedNodes.pop_front();
+		}
+		// Remove the node to be explored from info
+		//mCbfs->updateInfsblInfo(-getNinfeasibilities(nodeId), -getInfeasibilitySum(nodeId));
+		if (mCbfs->isEarlyTermToStart())
+		{
+			mCbfs->setSplxIterInfo(getNiterations());
+			mCbfs->calCriteria();
+			mCbfs->printCriteria();
+			abort();
+			return;
+		}
+	}
 
 	selectNode(nodeId);
 }
@@ -638,11 +943,11 @@ void CbfsNodeCallback::main()
 // Clean up a node from the CBFS data structure once it's deleted from the tree
 CbfsNodeData::~CbfsNodeData()
 {
-	if (mCbfs->getMode() != CplexOnly)
+	//if (mCbfs->getMode() != CplexOnly)
 		mCbfs->delNode(this);
 
 	// If the node hasn't been explored yet, mark it as pruned in the JSON file
-	if (mJsonFile && !explored)
+	if (mJsonFile && !explored && mJsonDetail)
 	{
 		fprintf(mJsonFile, "{\"node_id\": %lld, \"pruned_at\": %ld, \"lower_bound\": %0.2f, "
 			"\"upper_bound\": %0.2f}\n", id._id, mCbfs->getNumIterations(), lpval, incumbent);

@@ -18,7 +18,7 @@ using std::string;
 using std::stringstream;
 using std::setprecision;
 
-enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, RandCont };
+enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, RandCont, DiveComp };
 enum TieBreak { FIFO, LIFO, OG };
 
 /*** Constants and Types ***/
