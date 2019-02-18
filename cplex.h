@@ -12,6 +12,7 @@
 #include <map>
 #include <unordered_set>
 #include <list>
+#include <queue>
 #include <utility>
 #include <ilcplex/ilocplex.h>
 #include <ilcplex/ilocplexi.h>
@@ -40,11 +41,13 @@ public:
 		// Tie-breaking Rule Initialization
 		mTieBreak = OG;
 		// Dive Initialization
+		mIsCustomDiveOn = (maxDepth > 0) ? true : false;
 		mDiveStatus = (maxDepth > 0) ? true : false;
 		// Check if use CPLEX Dive
-		mUseCplexDive = (maxDepth == -1) ? true : false;
+		mIsCplexDiveOn = (maxDepth == -1) ? true : false;
 		preId = prepreId = 0;
 
+		mNumUnExpd = 0;
 		mNumDive = 0; mBFSInterval = 1000; mDiveMinDepth = 0;
 		mCurDiveCount = mDiveStartCont = 0;
 		mDiveTol = 0.25; mExpdMaxDepth = 0;
@@ -60,17 +63,23 @@ public:
 		prtIDLstInstedNode = -1;
 		penaltyPara = 1; penaltyOn = false;
 		// EXPERIMENT: Early Termination
-		mNumIntInfsblUnexpl = mSumIntInfsblUnexpl = 0;
+		mNumIntInfsblUnexplr = mSumIntInfsblUnexplr = 0;
 		mEarlyTermOn = (earlyTermIter > 0) ? true : false;
 		//geoMeanShift = 1;
-		
+		// Cont selection
+		mPreDepth = 0;
+		mNumConts = 0;
+		mMinNumContSel = 100;
+		mMaxNumConts = 8;
+		mBiasPara = 1.4;
+		mIsContInitd = false;
+		if (mMode == TreeCont)
+			turnOffDive();
 	}
 	~CbfsData();
 
 	void addNode(CbfsNodeData* nodeData);
 	void delNode(CbfsNodeData* nodeData);
-	void updateContScores();
-	void updateContScores(int contID, int score);
 	void updateBounds(double lb, double ub, double gap);
 	void updateExpdMaxDepth(int depth);
 	void probStep();
@@ -81,8 +90,8 @@ public:
 	int getNumNodesInCont(int contID);
 
 	NID getNextNode();
-	NID getNextNodePenalty();
-	NID getNextNodeBFS();
+	CbfsNodeData* getNextNodePenalty();
+	CbfsNodeData* getNextNodeBFS();
 	ContourMap::iterator getNextCont();
 
 	Mode getMode() { return mMode; }
@@ -93,7 +102,7 @@ public:
 	void setNumIterations(long i) { nIters = i; }
 	void updateContourBegin() { mCurrContour = mContours.begin(); }
 
-	// EXPERIMENT: Early termination and criteria for best contour strategy
+	// FUNCTIONS: Early termination and criteria for best contour strategy
 	void calCriteria();
 	bool isEarlyTermOn() { return mEarlyTermOn; }
 	bool isEarlyTermToStart() { return (nIters == earlyTermIter); }
@@ -110,10 +119,24 @@ public:
 	IloNumVarArray getIntVarArray() { return mAllIntVars; }
 	CbfsDive rcntAddedNodes;
 
-	// EXPERIMENT: Use CPLEX Dive
-	bool isCplexDiveOn() { return mUseCplexDive; }
+	// FUNCTIONS: Use CPLEX Dive
+	bool isCplexDiveOn() { return mIsCplexDiveOn; }
+	void setCplexDive(bool flag) { mIsCplexDiveOn = flag; }
 	bool isInSameDive(int id);
 	void updateDivePre(int id);
+
+	// FUNCTIONS: Contour selection
+	void updateCurContPayoff();
+	void updateOneStep(double value);
+	void updateContScores();
+	void initContScores();
+	void repopulateConts();
+	void resetSubtrees();
+	void setContScores(int contID, double score) { mContScores[contID] = score; }
+	void resetCurPayoff() { mCurPayoff = 0; mCurNumNodesExplrd = 0; }
+	void turnOnDive();
+	void turnOffDive() { mIsCustomDiveOn = false; mDiveStatus = false; mIsCplexDiveOn = false; }
+	int getContNum() { return mNumConts; }
 
 private:
 	Mode mMode;
@@ -126,43 +149,53 @@ private:
 	ContourMap::iterator mCurrContour;
 	CbfsDive mDiveCand, mProbOneSide, mProbCand;
 	int mMob, mLBContPara;
+	int mNumUnExpd;
+	// VARIABLES: Diving and probing
+	bool mIsCustomDiveOn;
 	int mNumDive, mBFSInterval;
 	int mCurDiveCount, mDiveStartCont;										// Diving parameters
 	int mDiveMinDepth, mDiveMaxDepth;										
 	double mDiveTol;
 	int mProbStep, mProbInterval, mPreProbEnd;								// Probing parameters
 	bool mDiveStatus, mProbStatus;											// Diving and Probing flags
-	vector<int> mContScores;
-
-	// EXPERIMENT: Dive contour, deviating path penalty
+	
+	// Dive contour, deviating path penalty
 	int mDiveContPara, prtIDLstInstedNode;
 	int preNodeID, preContID;												// ID of the node explored just prior to current one
 	double preNodeLB, penaltyPara;
 	bool penaltyOn;
-
 	// EXPERIMENT: Hybrid estimate and value
 	double mHybridBestPara;
-
 	// Record the maximum depth in current run
 	int mExpdMaxDepth;
-
-	// EXPERIMENT: Early termination and criteria for best contour strategy
+	// VARIABLES: Early termination and criteria for best contour strategy
 	bool mEarlyTermOn;
 	int earlyTermIter;
 	double rootLB;
 	//double geoMeanShift;
 	int mNumUnexplNodes;													// Criteria 1: Number of unexplored nodes
 	double mLbImprv;														// Criteria 2: LB percentage improvement from root LB
-	int mNumIntInfsblUnexpl;												// Criteria 3: Sum of number of integer-infeasible variables of unexplored ndoes
-	int mSumDpthUnexpl;														// Criteria 4: Sum of depth of unexplored nodes
-	double mSumIntInfsblUnexpl;												// Criteria 5: Sum of integer infeasibilites of unexplored ndoes
+	int mNumIntInfsblUnexplr;												// Criteria 3: Sum of number of integer-infeasible variables of unexplored ndoes
+	int mSumDpthUnexplr;													// Criteria 4: Sum of depth of unexplored nodes
+	double mSumIntInfsblUnexplr;											// Criteria 5: Sum of integer infeasibilites of unexplored ndoes
 	int mSumIterSplx;														// Criteria 8: Sum of simplex iterations
 	int mNVars, mNIntVars;													// Num of Decision Variables
 	timespec mRoot;
-
-	// Use CPLEX Dive
-	bool mUseCplexDive;
+	// VARIABLES: Use CPLEX Dive
+	bool mIsCplexDiveOn;
 	int preId, prepreId;
+
+	// VARIABLES: ContourSelection
+	bool mIsContInitd;
+	int mPreDepth;
+	int mMaxNumConts, mNumContVisits, mCurNumNodesExplrd;
+	int mNumConts;
+	int mMinNumContSel;
+	double mBiasPara, mCurPayoff;
+	map<int, int> mContIndexMap;
+	vector<double> mContScores;
+	vector<double> mContPayoffs;
+	vector<int> mContVisits;
 
 	IloNumVarArray mAllVars, mAllIntVars;
 
@@ -228,12 +261,15 @@ class CbfsNodeData : public IloCplex::MIPCallbackI::NodeData
 {
 public:
 	int depth, numPos, numNull, numInfeasibles;
-
+	int lastBranch;			// 0 if branching down (left), 1 if branching up (right)
 	int contour;
 	NID id;
 	double estimate, lpval, incumbent;
 	RangeMap rmap;
-	int parent;
+	int parent, parentCont;
+	int nodeContID, parentNodeContID;
+	int subtree, parentSubtree;
+	int weiContour;
 	bool explored;
 
 	int infNum;
@@ -242,10 +278,12 @@ public:
 	CbfsNodeData(CbfsData* cbfs, FILE* jsonFile, bool jsonDetail) : 
 		explored(false), mCbfs(cbfs), mJsonFile(jsonFile), mJsonDetail(jsonDetail) {}
 	~CbfsNodeData();
+	void calSubtree();
 
 private:
 	CbfsData* mCbfs;
 	FILE* mJsonFile;
 	bool mJsonDetail;
 };
+
 #endif // CPLEX_H

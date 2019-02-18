@@ -1,4 +1,4 @@
-// Main.h: David R. Morrison
+// Main.h: Wenda Zhang
 // Include file for the dual network graph visualizer
 
 #ifndef MAIN_H
@@ -51,16 +51,19 @@ static const char* optStrings[][3] =
 	{BOOL, "D", "Disable callbacks entirely (default)"},
 	{BOOL, "b", "Use no contours (BFS)"},
 	{BOOL, "w", "Use weighted contour rule (default pw = 1, nw = 1)"},
+	{SEP, "", "" },
 	{BOOL, "W", "Disable warm starts and cut generation"},
 	{BOOL, "R", "Use random contour"},
 	{BOOL, "A", "JSON output details of iterations"},
+	{BOOL, "U", "Contour selection strategy using UCB"},
+	{SEP, "", "" },
 	{ARG, "d", "Use diving heuristic, set maximum diving depth"},
 	{ARG, "p", "Take probing step during diving, set probing interval"},
 	{ARG, "r", "Set random seed for CPLEX"},
 	{ARG, "t", "Time limit"},
-	{SEP, "", ""},
 	{ARG, "M", "Measure of best: 1 - worst estimate, 2 - worst lower bound, "
-		"3 - best estimate, 4 - best lower bound"},
+		"3 - best estimate, 4 - best lower bound (default)"},
+	{SEP, "", "" },
 	{ARG, "l", "LB contour number"},
 	{ARG, "P", "Weight for the positive assignments"},
 	{ARG, "N", "Weight for the null assignments"},

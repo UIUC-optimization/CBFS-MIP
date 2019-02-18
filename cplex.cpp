@@ -4,6 +4,9 @@
 
 #include "cplex.h"
 
+bool depthComp(CbfsNodeData* a, CbfsNodeData* b) { return (a->depth < b->depth); }
+bool weiContComp(CbfsNodeData* a, CbfsNodeData* b) { return (a->weiContour < b->weiContour); }
+
 // Import the model and set up the CPLEX solver
 Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit, 
 		bool disableAdvStart, int rand, bool jsonDetail) :
@@ -75,6 +78,7 @@ void Cplex::solve()
 	elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
 	double elpToRoot = (mCbfs->getRootTime()).tv_sec - start.tv_sec;
 	elpToRoot += ((mCbfs->getRootTime()).tv_nsec - start.tv_nsec) / 1000000000.0;
+	int numCont = mCbfs->getContNum();
 
 	printf("DATA_START\n{\n");
 
@@ -132,11 +136,12 @@ void Cplex::solve()
 																mCplex.getObjValue(), mCplex.getMIPRelativeGap(), mCplex.getIncumbentNode()); }
 			catch (const IloCplex::Exception& e) { fprintf(mJsonFile, "inf, "); }
 			fprintf(mJsonFile, "\"total_nodes\": %ld, \"end_time\": %0.2f, \"num_vars\": %d, ", mCplex.getNnodes(), elapsed, mCplex.getNintVars());
-			fprintf(mJsonFile, "\"root_time\": %0.2f}\n", elpToRoot);
+			fprintf(mJsonFile, "\"root_time\": %0.2f, ", elpToRoot);
+			fprintf(mJsonFile, "\"cont_rem\": %d}\n", numCont);
 		}
 		else
-			fprintf(mJsonFile, "{\"cpl_status\": %d, \"total_nodes\": %ld, \"end_time\": %0.2f, \"num_vars\": %d, \"root_time\": %0.2f}\n",
-			status, mCplex.getNnodes(), elapsed, mCplex.getNintVars(), elpToRoot);
+			fprintf(mJsonFile, "{\"cpl_status\": %d, \"total_nodes\": %ld, \"end_time\": %0.2f, \"num_vars\": %d, \"root_time\": %0.2f, \"cont_rem\": %d}\n",
+			status, mCplex.getNnodes(), elapsed, mCplex.getNintVars(), elpToRoot, numCont);
 	}
 
 }
@@ -245,6 +250,92 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 	}
 	// The contour heap now store pointers to the nodeData instances, instead of NID.
 	mContours[nodeData->contour].insert({best, nodeData});
+	// Increase number of unexplored nodes by 1
+	mNumUnExpd++;
+}
+
+int CbfsData::calContour(CbfsNodeData* nodeData)
+{
+	if (nodeData->depth == 0)
+		return 0;
+	int contour, numInBaseCont;
+	int lb = nodeData->lpval;
+	switch (mMode) {
+		/*----------------------------------------------------*/
+		// Assign nodes by the weight of branch on their path from root
+	case Weighted:
+		contour = mPosW * nodeData->numPos + mNullW * nodeData->numNull;
+		break;
+		/*----------------------------------------------------*/
+		// Assign nodes by their lower bound
+	case LBContour:
+		if (bestUB == INFINITY)
+		{
+			// The labeling function here could lead to extremely large contour numbers that might be a problem.
+			contour = 0;
+		}
+		else
+		{
+			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mLBContPara)));
+		}
+		if (contour > (mLBContPara - 1))
+			contour = mLBContPara - 1;
+		break;
+		/*----------------------------------------------------*/
+		// Assign randomly a contour to each node
+	case RandCont:
+		contour = rand() % 5;
+		break;
+		/*----------------------------------------------------*/
+		// Assign nodes to the next contour or the first one
+	case DiveComp:
+		numInBaseCont = getNumNodesInCont(0);
+		if (preContID < mDiveContPara && prtIDLstInstedNode != nodeData->parent)
+		{
+			// First of the two child nodes generated will go to the next contour
+			// as long as it does not exceed the contour limit
+			contour = preContID + 1;
+			prtIDLstInstedNode = nodeData->parent;
+		}
+		else
+		{
+			// Second of the two child nodes may go to the first contour or the next
+			if (preContID >= mDiveContPara / 2)
+				contour = 0;
+			else if (numInBaseCont <= mDiveContPara / 10)
+				contour = 0;
+			else
+				contour = preContID + 1;
+		}
+		break;
+		/*----------------------------------------------------*/
+		// Contour selection
+	case TreeCont:
+
+		if (mIsContInitd)
+			contour = nodeData->parentCont;
+		else
+		{
+			//if (nodeData->parentCont > 0)
+			//	contour = 2 * nodeData->parentCont - (1 - nodeData->lastBranch);
+			//else if (nodeData->parentCont < 0)
+			//	contour = 2 * nodeData->parentCont + nodeData->lastBranch;
+			//else
+			//	contour = nodeData->lastBranch * 2 - 1;
+			contour = 0;
+		}
+		
+		break;
+		/*----------------------------------------------------*/
+		// CPLEX default node selection
+	case CplexOnly:
+		contour = -1;
+		break;
+		/*----------------------------------------------------*/
+	default:
+		contour = 0;
+	}
+	return contour;
 }
 
 void CbfsData::delNode(CbfsNodeData* nodeData)
@@ -321,11 +412,6 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 	// If the contour is empty, remove it from the map
 	if (mContours[nodeData->contour].empty())
 	{
-		/*************************************/
-		// When contour becomes empty, clear corresponding score
-		//TODO: Use a separate function for contour score updates
-		updateContScores(nodeData->contour, 0);
-		/*************************************/
 		// If the current iterator points to the contour we're deleting, increment it
 		if (mCurrContour == mContours.find(nodeData->contour))
 		{
@@ -333,11 +419,20 @@ void CbfsData::delNode(CbfsNodeData* nodeData)
 				mCurrContour = mContours.end();
 			--mCurrContour;
 		}
+		if (mMode == TreeCont && mIsContInitd)
+		{
+			int i = mContIndexMap[nodeData->contour];
+			mNumContVisits -= mContVisits[i];
+			mContVisits[i] = -1;
+			//mContScores[i] = -Infinity;
+			//mContPayoffs[i] = -Infinity;
+		}
 		mContours.erase(nodeData->contour);
 	}
-
 	// Update the max depth of processed nodes
 	updateExpdMaxDepth(nodeData->depth);
+	// Reduce number of unexplored nodes by 1
+	mNumUnExpd--;
 }
 
 // Select the next node to explore from the CBFS data structure
@@ -345,93 +440,110 @@ NID CbfsData::getNextNode()
 {
 	NID id; id._id = -1;
 
-	if (!mDiveCand.empty())
+	/*----------------------------------------------------*/
+	// Manul Diving Control
+	if (mIsCustomDiveOn)
 	{
-		// Perform probing either when specific condition satisfied or probing already started
-		if (mProbStep != 0 || (mProbStatus && (mCurDiveCount == 0 
-						   || (mCurDiveCount - mPreProbEnd) == mProbInterval)))
-			probStep();
-		if (mProbStep != 2) mCurDiveCount++;							// Avoid an extra depth update when probing
+		if (!mDiveCand.empty())
+		{
+			// Perform probing either when specific condition satisfied or probing already started
+			if (mProbStep != 0 || (mProbStatus && (mCurDiveCount == 0
+				|| (mCurDiveCount - mPreProbEnd) == mProbInterval)))
+				probStep();
+			if (mProbStep != 2) mCurDiveCount++;							// Avoid an extra depth update when probing
 
-		CbfsNodeData* diveNode = mDiveCand.front();
-		id = diveNode->id;
-		mDiveCand.clear();
-
-		if (mCurDiveCount >= mDiveMaxDepth) mDiveStatus = false;		// If maximal depth of a dive is reached, terminate current dive
-		else if (mCurDiveCount >= mDiveMinDepth && bestUB != INFINITY)
-		{
-			// If current LB too close to global UB, terminate current dive
-			if ((diveNode->lpval - bestLB) / (bestUB - bestLB) > mDiveTol) mDiveStatus = false;
-			// If no change in relaxed solution, terminate diving with probability
-			//int rnum = rand() % mDiveMaxDepth;
-			//if (mDiveCand.front()->lpval == preNodeLB && mDiveCount > rnum)
-			//	mDiveStatus = false;
-			//preNodeLB = mDiveCand.front()->lpval;
-		}
-		return id;
-	}
-	// Hhandle empty successor list mid-probing
-	else if (mProbStatus && mProbStep != 0)
-	{
-		if (mProbStep == 1) mDiveCand = mProbCand;		// If child nodes of first candidate are pruned
-		else mDiveCand = mProbOneSide;
-		if (mDiveCand.empty())
-		{
-			terminateProb();
-			mCurDiveCount = 0; mPreProbEnd = 0;
-		}
-		else
-		{
-			id = mDiveCand.front()->id;
+			CbfsNodeData* diveNode = mDiveCand.front();
+			id = diveNode->id;
 			mDiveCand.clear();
-			terminateProb();
-			mPreProbEnd = mCurDiveCount;
-			mCurDiveCount++;
+
+			if (mCurDiveCount >= mDiveMaxDepth) mDiveStatus = false;		// If maximal depth of a dive is reached, terminate current dive
+			//else if (mCurDiveCount >= mDiveMinDepth && bestUB != INFINITY)
+			//{
+			//	// If current LB too close to global UB, terminate current dive
+			//	if ((diveNode->lpval - bestLB) / (bestUB - bestLB) > mDiveTol) mDiveStatus = false;
+			//}
 			return id;
 		}
+		// Hhandle empty successor list mid-probing
+		else if (mProbStatus && mProbStep != 0)
+		{
+			if (mProbStep == 1) mDiveCand = mProbCand;		// If child nodes of first candidate are pruned
+			else mDiveCand = mProbOneSide;
+			if (mDiveCand.empty())
+			{
+				terminateProb();
+				mCurDiveCount = 0; mPreProbEnd = 0;
+			}
+			else
+			{
+				id = mDiveCand.front()->id;
+				mDiveCand.clear();
+				terminateProb();
+				mPreProbEnd = mCurDiveCount;
+				mCurDiveCount++;
+				return id;
+			}
+		}
+		// Two possibilities for mDiveCand to be empty: 
+		// 1. maximal depth reached in last iteration
+		// 2. node in previous iteration pruned somehow
+		// mMaxDepth > 0 means diving is on, then this block enables diving for the next contour.
+		else if (mDiveMaxDepth > 0)
+		{
+			mCurDiveCount = 0; mPreProbEnd = 0;
+			mDiveStatus = true;
+		}
 	}
-	// Two possibilities for mDiveCand to be empty: 
-	// 1. maximal depth reached in last iteration
-	// 2. node in previous iteration pruned somehow
-	// mMaxDepth > 0 means diving is on, then this block enables diving for the next contour.
-	else if (mDiveMaxDepth > 0)
-	{
-		mCurDiveCount = 0; mPreProbEnd = 0;
-		mDiveStatus = true;
-	}
+	/*----------------------------------------------------*/
 
+	/*----------------------------------------------------*/
 	// Increment the iterator into the heap structure
-	//++mCurrContour;
 	mCurrContour = getNextCont();
 	if (mCurrContour == mContours.end())
 		mCurrContour = mContours.begin();
+	/*----------------------------------------------------*/
 
+	/*----------------------------------------------------*/
 	// Get one node from contour mCurrContour points to
 	if (mCurrContour != mContours.end()) 
 	{
 		// Tie breaking rules
+		CbfsNodeData* nxt;
+		vector<CbfsNodeData*> candidates;
 		double search = mCurrContour->second.begin()->first;
 		auto range = mCurrContour->second.equal_range(search);
 		switch (mTieBreak)
 		{
 		case FIFO:
-			id = range.first->second->id;
+			nxt = range.first->second;
+			//id = range.first->second->id;
 			break;
 		case LIFO:
-			id = (--range.second)->second->id;
+			nxt = (--range.second)->second;
+			//id = (--range.second)->second->id;
 			break;
 		case OG:
-			id = mCurrContour->second.begin()->second->id;
+			nxt = mCurrContour->second.begin()->second;
+			//id = mCurrContour->second.begin()->second->id;
+			break;
+		case ARB:
+			// Breaking ties arbitrarily
+			for (auto iter = range.first; iter != range.second; iter++)
+			{
+				candidates.push_back(iter->second);
+			}
+			nxt = candidates[rand() % candidates.size()];
 			break;
 		default:
-			id = mCurrContour->second.begin()->second->id;
+			nxt = mCurrContour->second.begin()->second;
+			//id = mCurrContour->second.begin()->second->id;
 		}
-
-		// EXPERIMENT: Penalized deviating from path
+		// Penalized deviating from path
 		if (penaltyOn && mCurrContour != mContours.begin())
-			id = getNextNodePenalty();
+			nxt = getNextNodePenalty();
+		id = nxt->id;
+		mPreDepth = nxt->depth;
 	}
-
 	// There should always be a next node when we call this
 	if (id._id == -1) 
 	{
@@ -441,49 +553,56 @@ NID CbfsData::getNextNode()
 			printf("Contour %d has size %ld\n", i->first, i->second.size());
 		throw ERROR << "Node ID should not be -1!";
 	}
+	/*----------------------------------------------------*/
 
+	/*----------------------------------------------------*/
+	// Additional manual dive control, and records info on dive
 	if (mDiveStatus) 
 	{
 		mDiveStartCont = mCurrContour->first;		// record contour number of the dive start node
 		preNodeLB = -INFINITY;
 		mNumDive++;
-		if (mNumDive % mBFSInterval == 0)
-			id = getNextNodeBFS();
+		// Each mBFSInterval number of Best Estimate Search is followed by Best LB
+		//if (mNumDive % mBFSInterval == 0)
+		//	id = getNextNodeBFS();
 	}
+	/*----------------------------------------------------*/
 	preNodeID = id._id;
 	preContID = mCurrContour->first;
-
+	
 	return id;
 }
 
-NID CbfsData::getNextNodeBFS()
+CbfsNodeData* CbfsData::getNextNodeBFS()
 {
 	double minLB = mCurrContour->second.begin()->second->lpval;
-	NID minID = mCurrContour->second.begin()->second->id;
+	CbfsNodeData* minNodeData = mCurrContour->second.begin()->second;
+	//NID minID = mCurrContour->second.begin()->second->id;
 	for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
 	{
 		if (iter->second->lpval < minLB) 
 		{
 			minLB = iter->second->lpval;
-			minID = iter->second->id;
+			minNodeData = iter->second;
 		}
 	}
-	return minID;
+	return minNodeData;
 }
 
 // EXPERIMENT: Penalized deviating from path
 // Currently only with minimizing and best-estimate search
-NID CbfsData::getNextNodePenalty()
+CbfsNodeData* CbfsData::getNextNodePenalty()
 {
 	double minPSearch = INFINITY;
 	double curPSearch;
-	NID minID;
+	//NID minID;
+	CbfsNodeData* minNodeData;
 	// Define penalty for deviating
 	double penalty = penaltyPara;
 	if (bestUB != INFINITY)
 		penalty = mReOptGap * penaltyPara / 2;
 
-	minID = mCurrContour->second.begin()->second->id;
+	minNodeData = mCurrContour->second.begin()->second;
 	for (auto iter = mCurrContour->second.begin(); iter != mCurrContour->second.end(); iter++)
 	{
 		if (preNodeID == iter->second->parent)
@@ -493,149 +612,81 @@ NID CbfsData::getNextNodePenalty()
 		if (curPSearch < minPSearch)
 		{
 			minPSearch = curPSearch;
-			minID = iter->second->id;
+			minNodeData = iter->second;
 		}
 	}
-	return minID;
+	return minNodeData;
 }
 
 // Select the next contour to be explored
 ContourMap::iterator CbfsData::getNextCont()
 {
-	ContourMap::iterator iterToBe;
-	int sumScore = 0;
-	int randScore;
-	switch (mMode) 
-	{
-	case LBContour:
-		iterToBe = mContours.begin();
-		for (int i = 0; i < mContScores.size(); i++)
-		{
-			sumScore += mContScores[i];
-		}
-		randScore = rand() % sumScore;
-		sumScore = 0;
-		for (int i = 0; i < mContScores.size(); i++, iterToBe++)
-		{
-			sumScore += mContScores[i];
-			if (mContScores[i] != 0 && randScore < sumScore)
-				break;
-		}
-		break;
-	default:
-		iterToBe = mCurrContour;
-		iterToBe++;
-	}
-	return iterToBe;
-}
-
-void CbfsData::updateContScores()
-{
+	ContourMap::iterator selectedCont;
 	switch (mMode)
 	{
-	case LBContour:
-		mContScores[mDiveStartCont]++;
-		break;
-	default:
-		break;
-	}
-}
-
-void CbfsData::updateContScores(int contID, int score)
-{
-	switch (mMode) 
-	{
-	case LBContour:
-		mContScores[contID] = score;
-		break;
-	default:
-		break;
-	}
-}
-
-// Update lower and upper bound, optimality gap
-void CbfsData::updateBounds(double lb, double ub, double gap)
-{
-	bestLB = (bestLB < lb) ? lb : bestLB;
-	bestUB = (bestUB > ub) ? ub : bestUB;
-	mReOptGap = gap;
-}
-
-void CbfsData::updateExpdMaxDepth(int depth)
-{
-	mExpdMaxDepth = (depth > mExpdMaxDepth) ? depth : mExpdMaxDepth;
-}
-
-int CbfsData::calContour(CbfsNodeData* nodeData)
-{
-	int contour, numInBaseCont;
-	int lb = nodeData->lpval;
-	switch (mMode) {
-	/*----------------------------------------------------*/
-	// Assign nodes by the weight of branch on their path from root
-	case Weighted:
-		contour = mPosW * nodeData->numPos + mNullW * nodeData->numNull;
-		break;
-	/*----------------------------------------------------*/
-	// Assign nodes by their lower bound
-	case LBContour:
-		if (bestUB == INFINITY)
+	case TreeCont:
+		// Initialize contour score when number of contour exceeds mMaxNumConts
+		if (!mIsContInitd && mNumUnExpd >= mMaxNumConts)
 		{
-			// The labeling function here could lead to extremely large contour numbers that might be a problem.
-			contour = 0;
+			repopulateConts();
+			initContScores();
+			turnOnDive();
+		}
+		if (mIsContInitd)
+		{
+			if (mContours.size() == 1 && mNumContVisits > mMinNumContSel)
+			{
+				repopulateConts();
+				initContScores();
+			}
+			mNumConts = mContours.size();
+			if (mNumContVisits != 0)
+			{
+				updateCurContPayoff();
+				updateContScores();
+			}
+			double maxScore = -Infinity;
+			vector<int> candidates;
+			for (auto iter = mContours.begin(); iter != mContours.end(); iter++)
+			{
+				if (mContScores[mContIndexMap[iter->first]] > maxScore)
+				{
+					maxScore = mContScores[mContIndexMap[iter->first]];
+					selectedCont = iter;
+				}
+			}
+			mNumContVisits++;
+			mContVisits[mContIndexMap[selectedCont->first]]++;
+			resetCurPayoff();
+			//printScores();
+			//if (mJsonFile)
+			//{
+			//	fprintf(mJsonFile, "{ ");
+			//	for (int i = 0; i < mContVisits.size(); i++)
+			//		fprintf(mJsonFile, "%d ", mContVisits[i]);
+			//	fprintf(mJsonFile, "}\n");
+			//}
 		}
 		else
 		{
-			contour = int(floor(fabs((lb - bestLB) / (bestUB - bestLB) * mLBContPara)));
-		}
-		if (contour > (mLBContPara - 1))
-			contour = mLBContPara - 1;
-		/*************************************/
-		// When new non-empty contour appears, update corresponding score
-		//TODO: Use a separate function for contour score updates
-		if (mContScores[contour] == 0)
-			updateContScores(contour, 1);
-		/*************************************/
-		break;
-	/*----------------------------------------------------*/
-	// Assign randomly a contour to each node
-	case RandCont:
-		contour = rand() % 5;
-		break;
-	/*----------------------------------------------------*/
-	// Assign nodes to the next contour or the first one
-	case DiveComp:
-		numInBaseCont = getNumNodesInCont(0);
-		if (preContID < mDiveContPara && prtIDLstInstedNode != nodeData->parent)
-		{
-			// First of the two child nodes generated will go to the next contour
-			// as long as it does not exceed the contour limit
-			contour = preContID + 1;
-			prtIDLstInstedNode = nodeData->parent;
-		}
-		else
-		{
-			// Second of the two child nodes may go to the first contour or the next
-			if (preContID >= mDiveContPara / 2)
-				contour = 0;
-			else if (numInBaseCont <= mDiveContPara / 10)
-				contour = 0;
-			else
-				contour = preContID + 1;
+			selectedCont = mCurrContour;
+			selectedCont++;
+			//if (selectedCont == mContours.end() ||
+			//		selectedCont->second.begin()->second->depth > mPreDepth)
+			//{
+			//	selectedCont = mContours.begin();
+			//}
 		}
 		break;
-	/*----------------------------------------------------*/
-	// CPLEX default node selection
-	case CplexOnly:
-		contour = -1;
-		break;
-	/*----------------------------------------------------*/
 	default:
-		contour = 0;
+		selectedCont = mCurrContour;
+		selectedCont++;
 	}
-	return contour;
+	return selectedCont;
 }
 
+/*----------------------------------------------------*/
+// Utilies: probing
 // Main procedure of probing step: store the two parent node, explore both and compare results
 void CbfsData::probStep()
 {
@@ -681,38 +732,17 @@ void CbfsData::terminateProb()
 		mProbStep = 0;
 	}
 }
-
-void CbfsData::printScores()
-{
-	if (mJsonFile)
-	{
-		if (mMode == LBContour)
-		{
-			fprintf(mJsonFile, "{ ");
-			for (int i = 0; i < mContScores.size(); i++)
-				fprintf(mJsonFile, "%d ", mContScores[i]);
-			fprintf(mJsonFile, "}\n");
-		}
-	}
-}
-
-int CbfsData::getNumNodesInCont(int contID)
-{
-	auto iter = mContours.find(contID);
-	if (iter == mContours.end())
-		return 0;
-	else
-		return iter->second.size();
-}
-
+/*----------------------------------------------------*/
+/*----------------------------------------------------*/
+// Utilies: Early Termination Criteria
 void CbfsData::calCriteria()
 {
 	ContourMap::iterator iterCont;
 	double lbGap;
 	mNumUnexplNodes = 0;
 	mLbImprv = 1;
-	mSumDpthUnexpl = 0;
-	mNumIntInfsblUnexpl = mSumIntInfsblUnexpl = 0;
+	mSumDpthUnexplr = 0;
+	mNumIntInfsblUnexplr = mSumIntInfsblUnexplr = 0;
 	for (iterCont = mContours.begin(); iterCont != mContours.end(); iterCont++)
 	{
 		for (auto iterNode = iterCont->second.begin(); iterNode != iterCont->second.end(); iterNode++)
@@ -734,11 +764,11 @@ void CbfsData::calCriteria()
 			//printf("Current mLbImprv: %0.2f, LB: %0.2f, Root: %0.2f\n", mLbImprv, iterNode->second->lpval, rootLB);
 
 			// Sum of number of integer-infeasible variables of unexplored ndoes
-			mNumIntInfsblUnexpl += iterNode->second->infNum;
-			mSumIntInfsblUnexpl += iterNode->second->infSum;
+			mNumIntInfsblUnexplr += iterNode->second->infNum;
+			mSumIntInfsblUnexplr += iterNode->second->infSum;
 
 			// Unexplored Nodes Depth
-			mSumDpthUnexpl += iterNode->second->depth;
+			mSumDpthUnexplr += iterNode->second->depth;
 		}
 	}
 	//mLbImprv = mLbImprv / mNumUnexplNodes;
@@ -749,11 +779,13 @@ void CbfsData::printCriteria()
 {
 	if (mJsonFile)
 	{
-		fprintf(mJsonFile, "{\"numUnexpNode\": %d, \"impvMean\": %0.2f, \"numIntInf\": %d, \"sumDepth\": %d, ", mNumUnexplNodes, mLbImprv, mNumIntInfsblUnexpl, mSumDpthUnexpl);
-		fprintf(mJsonFile, "\"sumIntInf\": %0.2f, \"bestLB\": %0.2f, \"bestUB\": %0.2f, \"numIterSplx\": %d}\n", mSumIntInfsblUnexpl, bestLB, bestUB, mSumIterSplx);
+		fprintf(mJsonFile, "{\"numUnexpNode\": %d, \"impvMean\": %0.2f, \"numIntInf\": %d, \"sumDepth\": %d, ", mNumUnexplNodes, mLbImprv, mNumIntInfsblUnexplr, mSumDpthUnexplr);
+		fprintf(mJsonFile, "\"sumIntInf\": %0.2f, \"bestLB\": %0.2f, \"bestUB\": %0.2f, \"numIterSplx\": %d}\n", mSumIntInfsblUnexplr, bestLB, bestUB, mSumIterSplx);
 	}
 }
-
+/*----------------------------------------------------*/
+/*----------------------------------------------------*/
+// FUNCTIONS: CPLEX dive
 bool CbfsData::isInSameDive(int id)
 {
 	return ((id == preId) || (id == prepreId));
@@ -764,6 +796,207 @@ void CbfsData::updateDivePre(int id)
 	prepreId = preId;
 	preId = id;
 }
+/*----------------------------------------------------*/
+/*----------------------------------------------------*/
+// FUNCTIONS: ContourSelection
+// ContourSelection: 
+void CbfsData::updateCurContPayoff()
+{
+	if (mMode == TreeCont)
+	{
+		int curCont = mContIndexMap[mCurrContour->first];					// id of current contour
+		int visits = mContVisits[curCont];									// number of visits to current contour
+
+		if (mCurNumNodesExplrd != 0)
+			mContPayoffs[curCont] = (mContPayoffs[curCont] * (visits - 1) + mCurPayoff) / visits;
+			//mContPayoffs[curCont] = mContPayoffs[curCont] * ((visits - 1) / double(visits)) + mCurPayoff / visits;
+	}
+}
+
+// ContourSelection: calculate new score for contours
+void CbfsData::updateContScores()
+{
+	if (mMode == TreeCont)
+	{
+		for (int i = 0; i < mContPayoffs.size(); i++)
+		{
+			if (mContVisits[i] == 0)
+				mContScores[i] = mContPayoffs[i];
+			else if (mContVisits[i] != -1)
+				mContScores[i] = mContPayoffs[i]
+						+ mBiasPara * sqrt(log(mNumContVisits) / mContVisits[i]);
+		}
+	}
+}
+
+// ContourSelection: map contours to scores
+void CbfsData::initContScores()
+{
+	// initialize contour visits/payoffs/scores
+	mNumConts = mContours.size();
+	int id = 0;
+	double value;
+	int count;
+	mContScores.clear(); mContScores.resize(mNumConts);
+	mContVisits.clear(); mContVisits.resize(mNumConts, 0);
+	mContPayoffs.clear(); mContPayoffs.resize(mNumConts);
+	for (auto iter = mContours.begin(); iter != mContours.end(); iter++, id++)
+	{
+		mContIndexMap[iter->first] = id;
+		count = 0;
+		for (auto nodeIter = iter->second.begin(); nodeIter != iter->second.end(); nodeIter++, count++)
+		{
+			value = (rootLB + Tolerance) / (nodeIter->first + Tolerance);
+			mContPayoffs[id] = (mContPayoffs[id] * count + value) / (count + 1);
+		}
+		mContScores[id] = mContPayoffs[id];
+	}
+	mCurPayoff = 0;
+	mNumContVisits = 0;
+	mCurNumNodesExplrd = 0;
+	mIsContInitd = true;
+}
+
+// ContourSelection: Assign nodes in a contour to different ones
+void CbfsData::repopulateConts()
+{
+	// Put all nodes in an array
+	vector<CbfsNodeData*> allNodes;
+	for each (auto c in mContours)
+	{
+		for each (auto n in c.second)
+		{
+			// Weighted Positive and Negative Branches, P1N-1
+			n.second->weiContour = n.second->numPos - n.second->numNull;
+			allNodes.push_back(n.second);
+		}
+	}
+	// sort the nodes by weighted positive/negative branches
+	sort(allNodes.begin(), allNodes.end(), weiContComp);
+	int numInCurCont = allNodes.size();
+	ContourMap tempMap;
+	CbfsNodeData* nodeData;
+	double best;
+	// Partition the nodes into at most mMaxNumConts number of contours 
+	int numInNewCont = numInCurCont / mMaxNumConts;
+	if (numInNewCont == 0)
+	{
+		for (int i = 0; i < numInCurCont; i++)
+			allNodes[i]->contour = i;
+	}
+	else
+	{
+		for (int i = 0; i < mMaxNumConts - 1; i++)
+			for (int j = i * numInNewCont; j < (i + 1)*numInNewCont; j++)
+				allNodes[j]->contour = i;
+		for (int j = (mMaxNumConts - 2)*numInNewCont; j < numInCurCont; j++)
+			allNodes[j]->contour = mMaxNumConts - 1;
+	}
+	// insert nodes into contours
+	for (int j = 0; j < allNodes.size(); j++)
+	{
+		nodeData = allNodes[j];
+		switch (mMob)
+		{
+		case 1:
+			best = (mSense == IloObjective::Maximize) ? nodeData->estimate : -nodeData->estimate;
+			break;
+		case 2:
+			best = (mSense == IloObjective::Maximize) ? nodeData->lpval : -nodeData->lpval;
+			break;
+		case 3:
+			best = (mSense == IloObjective::Maximize) ? -nodeData->estimate : nodeData->estimate;
+			break;
+		case 4:
+			best = (mSense == IloObjective::Maximize) ? -nodeData->lpval : nodeData->lpval;
+			break;
+		case 5:
+			best = nodeData->estimate * mHybridBestPara + nodeData->lpval * (1 - mHybridBestPara);
+			best = (mSense == IloObjective::Maximize) ? -best : best;
+			break;
+		default:
+			best = (mSense == IloObjective::Maximize) ? -nodeData->estimate : nodeData->estimate;
+			break;
+		}
+		tempMap[nodeData->contour].insert({ best, nodeData });
+	}
+	mContours = tempMap;
+}
+
+// ContourSelection: update contour score, single iteration
+void CbfsData::updateOneStep(double value)
+{
+	if (mMode == TreeCont && mIsContInitd)
+	{
+		value = (rootLB + Tolerance) / (value + Tolerance);
+		mCurPayoff = (mCurPayoff * mCurNumNodesExplrd + value) / (mCurNumNodesExplrd + 1);
+		//mCurPayoff = mCurPayoff * (double(mCurNumNodesExplrd) / (mCurNumNodesExplrd + 1))
+		//	+ value / (mCurNumNodesExplrd + 1);
+		mCurNumNodesExplrd++;
+	}
+}
+
+// ContourSelection:
+void CbfsData::printScores()
+{
+	if (mJsonFile)
+	{
+		if (mMode == TreeCont)
+		{
+			fprintf(mJsonFile, "{ ");
+			for (int i = 0; i < mContScores.size(); i++)
+				fprintf(mJsonFile, "%0.2f ", mContScores[i]);
+			fprintf(mJsonFile, "}\n");
+		}
+	}
+}
+
+// ContourSelection: 
+void CbfsData::turnOnDive()
+{
+	if (mDiveMaxDepth > 0)
+		mIsCustomDiveOn = true;
+	else
+		mIsCplexDiveOn = true;
+}
+
+// ContourSelection: reset all nodes to be root of subtree
+void CbfsData::resetSubtrees()
+{ 
+	for each (auto cont in mContours)
+	{
+		// there should only be one node in each contour
+		if (cont.second.size() > 1)
+			throw ERROR << "There should only be one node in each contour.";
+		(cont.second.begin())->second->subtree = 0;
+	}
+		
+}
+/*----------------------------------------------------*/
+/*----------------------------------------------------*/
+// FUNCTIONS: general utilities
+int CbfsData::getNumNodesInCont(int contID)
+{
+	auto iter = mContours.find(contID);
+	if (iter == mContours.end())
+		return 0;
+	else
+		return iter->second.size();
+}
+
+// Update lower and upper bound, optimality gap
+void CbfsData::updateBounds(double lb, double ub, double gap)
+{
+	bestLB = (bestLB < lb) ? lb : bestLB;
+	bestUB = (bestUB > ub) ? ub : bestUB;
+	mReOptGap = gap;
+}
+
+void CbfsData::updateExpdMaxDepth(int depth)
+{
+	mExpdMaxDepth = (depth > mExpdMaxDepth) ? depth : mExpdMaxDepth;
+}
+/*----------------------------------------------------*/
 
 // Do branching and store the generated nodes
 void CbfsBranchCallback::main()
@@ -780,16 +1013,13 @@ void CbfsBranchCallback::main()
 			else fprintf(mJsonFile, "false, ");
 			fprintf(mJsonFile, "\"upper_bound\": %0.2f}\n", getObjValue());
 		}
-		// If the solution is feasible, then check if this is the new incumbent solution
+		// Check if the solution is feasible
 		if (isIntegerFeasible()) 
 		{
-			int ub = mCbfs->getBestUB();
-			//int curSol = getObjValue();
-			//if (ub != INFINITY && ub > curSol)
-			if (ub != INFINITY)
-				mCbfs->updateContScores();
+			//int ub = mCbfs->getBestUB();
+			mCbfs->updateOneStep(getObjValue());
 			mCbfs->terminateProb();
-			mCbfs->printScores();
+			//mCbfs->printScores();
 		}
 		prune();
 		return;
@@ -800,6 +1030,7 @@ void CbfsBranchCallback::main()
 	double bestObj = getBestObjValue();
 	double optGap = getMIPRelativeGap();
 	mCbfs->updateBounds(bestObj, incumVal, optGap);
+	mCbfs->updateOneStep(getObjValue());
 
 	// myNodeData will be valid except at the root of the search
 	CbfsNodeData* myNodeData = (CbfsNodeData*)getNodeData();
@@ -843,7 +1074,8 @@ void CbfsBranchCallback::main()
 		{ 
 			newNodeData = new CbfsNodeData(mCbfs, mJsonFile, mJsonDetail); 
 			newNodeData->depth = 0; newNodeData->numPos = 0; newNodeData->numNull = 0;
-			newNodeData->contour = 0; newNodeData->parent = 0;
+			newNodeData->contour = 0; newNodeData->parent = 0; newNodeData->parentCont = 0;
+			newNodeData->subtree = 0; newNodeData->parentSubtree = 0;
 		}
 		newNodeData->infNum = 0; newNodeData->infSum = 0;
 		newNodeData->estimate = estimate;
@@ -854,26 +1086,35 @@ void CbfsBranchCallback::main()
 		newNodeData->depth++;
 
 		// Compute the values of the new bounds for the variable we're branching on
-		auto& rmap = newNodeData->rmap;
-		int oldLB = rmap.find(varId) != rmap.end() ? rmap[varId].first : vars[0].getLB();
-		int oldUB = rmap.find(varId) != rmap.end() ? rmap[varId].second : vars[0].getUB();
+		//auto& rmap = newNodeData->rmap;
+		//int oldLB = rmap.find(varId) != rmap.end() ? rmap[varId].first : vars[0].getLB();
+		//int oldUB = rmap.find(varId) != rmap.end() ? rmap[varId].second : vars[0].getUB();
 		if (dirs[0] == IloCplex::BranchUp) 
 		{
 			// Branching up means that we're imposing a new lower bound on the variable
 			newNodeData->numPos++;
-			if (rmap.find(varId) != rmap.end()) rmap[varId].first = bounds[0];
-			else rmap[varId] = make_pair(bounds[0], oldUB);
+			newNodeData->lastBranch = 1;
+			//if (rmap.find(varId) != rmap.end()) rmap[varId].first = bounds[0];
+			//else rmap[varId] = make_pair(bounds[0], oldUB);
 		}
 		if (dirs[0] == IloCplex::BranchDown) 
 		{
 			// Branching down means that we're imposing a new upper bound on the variable
 			newNodeData->numNull++;
-			if (rmap.find(varId) != rmap.end()) rmap[varId].second = bounds[0];
-			else rmap[varId] = make_pair(oldLB, bounds[0]);
+			newNodeData->lastBranch = 0;
+			//if (rmap.find(varId) != rmap.end()) rmap[varId].second = bounds[0];
+			//else rmap[varId] = make_pair(oldLB, bounds[0]);
 		}
 
 		// Tell CPLEX to create the branch and return the id of the new node
 		newNodeData->id = makeBranch(vars, bounds, dirs, estimate, newNodeData);
+		// Set variables for non-root nodes
+		if (myNodeData)
+		{
+			newNodeData->parentCont = myNodeData->contour;
+			//newNodeData->parentSubtree = myNodeData->subtree;
+			//newNodeData->calSubtree();
+		}
 
 		// Insert the newly-created node into our CBFS data structure
 		//if (mCbfs->getMode() != CplexOnly)
@@ -902,12 +1143,14 @@ void CbfsNodeCallback::main()
 	NID nodeId;
 	if (mCbfs->getMode() != CplexOnly)
 	{
+		// Check if CPLEX is still in the same dive
 		if (mCbfs->isCplexDiveOn())
 		{
 			nodeId = getNodeId(0);
 			CbfsNodeData* nodeData = (CbfsNodeData*)getNodeData(nodeId);
-			if (!mCbfs->isInSameDive(nodeData->parent))
+			if (!mCbfs->isInSameDive(nodeData->parent)) {
 				nodeId = mCbfs->getNextNode();
+			}
 			mCbfs->updateDivePre((nodeData->id)._id);
 		} 
 		else
@@ -952,4 +1195,15 @@ CbfsNodeData::~CbfsNodeData()
 		fprintf(mJsonFile, "{\"node_id\": %lld, \"pruned_at\": %ld, \"lower_bound\": %0.2f, "
 			"\"upper_bound\": %0.2f}\n", id._id, mCbfs->getNumIterations(), lpval, incumbent);
 	}
+}
+
+// Calculate subtree id based on parent subtree id
+void CbfsNodeData::calSubtree()
+{
+	if (parentSubtree > 0)
+		subtree = 2 * parentSubtree - (1 - lastBranch);
+	else if (parentSubtree < 0)
+		subtree = 2 * parentSubtree + lastBranch;
+	else
+		subtree = lastBranch * 2 - 1;
 }

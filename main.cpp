@@ -1,4 +1,4 @@
-// main.cpp: David R. Morrison
+// main.cpp: Wenda Zhang
 // Entry point 
 
 #include "main.h"
@@ -6,8 +6,7 @@
 
 #include <cstdio>
 #include <cstdlib>
-// Removed for Windows compatibility (also not currently being used)
-//#include <unistd.h>
+
 
 using namespace std;
 
@@ -92,6 +91,9 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 			break;
 		case 'R':
 			options.m = RandCont;
+			break;
+		case 'U':
+			options.m = TreeCont;
 			break;
 		case 'A':
 			options.jsDetail = true;

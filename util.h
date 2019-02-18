@@ -1,10 +1,11 @@
-// util.h: David R. Morrison, Mar. 2011
+// util.h: Wenda Zhang, modified from David R. Morrison
 // Utility functions
 
 #ifndef UTIL_H
 #define UTIL_H
 
 #include <vector>
+#include <set>
 #include <algorithm>
 #include <math.h>
 #include <exception>
@@ -18,8 +19,8 @@ using std::string;
 using std::stringstream;
 using std::setprecision;
 
-enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, RandCont, DiveComp };
-enum TieBreak { FIFO, LIFO, OG };
+enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, RandCont, DiveComp, TreeCont };
+enum TieBreak { FIFO, LIFO, OG, ARB };
 
 /*** Constants and Types ***/
 const double Tolerance = 0.000000001;
