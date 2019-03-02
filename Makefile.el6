@@ -7,17 +7,17 @@
 
 ###############################################################################
 # CPLEX options and flags
-CPLEX_DIR = /opt/ibm/ILOG/CPLEX_Studio125/cplex
-CONCERT_DIR = /opt/ibm/ILOG/CPLEX_Studio125/concert
+CPLEX_DIR = /opt/ibm/ILOG/CPLEX_Studio128/cplex
+CONCERT_DIR = /opt/ibm/ILOG/CPLEX_Studio128/concert
 
-SYSTEM = x86-64_sles10_4.1
+SYSTEM = x86-64_linux
 LIBFORMAT = static_pic
 
 CPLEX_LIBDIR = $(CPLEX_DIR)/lib/$(SYSTEM)/$(LIBFORMAT)
 CONCERT_LIBDIR = $(CONCERT_DIR)/lib/$(SYSTEM)/$(LIBFORMAT)
 
 CPX_CFLAGS = -I$(CPLEX_DIR)/include -I$(CONCERT_DIR)/include
-CPX_LDFLAGS = -L$(CPLEX_LIBDIR) -lilocplex -lcplex -L$(CONCERT_LIBDIR) -lconcert
+CPX_LDFLAGS = -L$(CPLEX_LIBDIR) -lilocplex -lcplex -L$(CONCERT_LIBDIR) -lconcert -ldl
 ###############################################################################
 
 SRCS = main.cpp cplex.cpp

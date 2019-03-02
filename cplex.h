@@ -164,15 +164,14 @@ private:
 	int preNodeID, preContID;												// ID of the node explored just prior to current one
 	double preNodeLB, penaltyPara;
 	bool penaltyOn;
-	// EXPERIMENT: Hybrid estimate and value
+	// VARIABLES: Hybrid estimate and value
 	double mHybridBestPara;
-	// Record the maximum depth in current run
-	int mExpdMaxDepth;
 	// VARIABLES: Early termination and criteria for best contour strategy
 	bool mEarlyTermOn;
 	int earlyTermIter;
 	double rootLB;
 	//double geoMeanShift;
+	int mExpdMaxDepth;														// Record the maximum depth in current run
 	int mNumUnexplNodes;													// Criteria 1: Number of unexplored nodes
 	double mLbImprv;														// Criteria 2: LB percentage improvement from root LB
 	int mNumIntInfsblUnexplr;												// Criteria 3: Sum of number of integer-infeasible variables of unexplored ndoes
@@ -184,7 +183,6 @@ private:
 	// VARIABLES: Use CPLEX Dive
 	bool mIsCplexDiveOn;
 	int preId, prepreId;
-
 	// VARIABLES: ContourSelection
 	bool mIsContInitd;
 	int mPreDepth;

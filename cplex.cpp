@@ -626,7 +626,7 @@ ContourMap::iterator CbfsData::getNextCont()
 	{
 	case TreeCont:
 		// Initialize contour score when number of contour exceeds mMaxNumConts
-		if (!mIsContInitd && mNumUnExpd >= mMaxNumConts)
+		if (!mIsContInitd && mNumUnExpd >= mMaxNumConts * 5)
 		{
 			repopulateConts();
 			initContScores();
@@ -634,12 +634,11 @@ ContourMap::iterator CbfsData::getNextCont()
 		}
 		if (mIsContInitd)
 		{
-			if (mContours.size() == 1 && mNumContVisits > mMinNumContSel)
-			{
-				repopulateConts();
-				initContScores();
-			}
-			mNumConts = mContours.size();
+			// if (mContours.size() == 1 && mNumContVisits > mMinNumContSel)
+			// {
+			// 	repopulateConts();
+			// 	initContScores();
+			// }
 			if (mNumContVisits != 0)
 			{
 				updateCurContPayoff();
@@ -671,11 +670,6 @@ ContourMap::iterator CbfsData::getNextCont()
 		{
 			selectedCont = mCurrContour;
 			selectedCont++;
-			//if (selectedCont == mContours.end() ||
-			//		selectedCont->second.begin()->second->depth > mPreDepth)
-			//{
-			//	selectedCont = mContours.begin();
-			//}
 		}
 		break;
 	default:
@@ -862,13 +856,13 @@ void CbfsData::repopulateConts()
 {
 	// Put all nodes in an array
 	vector<CbfsNodeData*> allNodes;
-	for each (auto c in mContours)
+	for (auto c = mContours.begin(); c != mContours.end(); c++)
 	{
-		for each (auto n in c.second)
+		for (auto n = c->second.begin(); n != c->second.end(); n++)
 		{
 			// Weighted Positive and Negative Branches, P1N-1
-			n.second->weiContour = n.second->numPos - n.second->numNull;
-			allNodes.push_back(n.second);
+			n->second->weiContour = n->second->numPos - n->second->numNull;
+			allNodes.push_back(n->second);
 		}
 	}
 	// sort the nodes by weighted positive/negative branches
@@ -879,6 +873,9 @@ void CbfsData::repopulateConts()
 	double best;
 	// Partition the nodes into at most mMaxNumConts number of contours 
 	int numInNewCont = numInCurCont / mMaxNumConts;
+	int extra = numInCurCont % mMaxNumConts;
+	int pre = 0;
+	int offset;
 	if (numInNewCont == 0)
 	{
 		for (int i = 0; i < numInCurCont; i++)
@@ -886,11 +883,14 @@ void CbfsData::repopulateConts()
 	}
 	else
 	{
-		for (int i = 0; i < mMaxNumConts - 1; i++)
-			for (int j = i * numInNewCont; j < (i + 1)*numInNewCont; j++)
-				allNodes[j]->contour = i;
-		for (int j = (mMaxNumConts - 2)*numInNewCont; j < numInCurCont; j++)
-			allNodes[j]->contour = mMaxNumConts - 1;
+		for (int i = 0; i < mMaxNumConts; i++)
+		{
+			offset = (extra > 0) ? 1 : 0;
+			extra--;
+			for (int j = 0; j < numInNewCont + offset; j++)
+				allNodes[j + pre]->contour = i;
+			pre += numInNewCont + offset;
+		}
 	}
 	// insert nodes into contours
 	for (int j = 0; j < allNodes.size(); j++)
@@ -963,12 +963,12 @@ void CbfsData::turnOnDive()
 // ContourSelection: reset all nodes to be root of subtree
 void CbfsData::resetSubtrees()
 { 
-	for each (auto cont in mContours)
+	for (auto cont = mContours.begin(); cont != mContours.end(); cont++)
 	{
 		// there should only be one node in each contour
-		if (cont.second.size() > 1)
+		if (cont->second.size() > 1)
 			throw ERROR << "There should only be one node in each contour.";
-		(cont.second.begin())->second->subtree = 0;
+		(cont->second.begin())->second->subtree = 0;
 	}
 		
 }
