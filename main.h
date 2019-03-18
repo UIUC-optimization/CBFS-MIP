@@ -28,26 +28,9 @@
     } nullptr = {};              // and whose name is nullptr
 #endif
 
-struct opts
-{
-	Mode m;
-	double posW, nullW;
-	const char* json_filename;
-	bool disableAdvStart;
-	int timelimit;
-	int mob;
-	int cPara;
-	int maxDepth;
-	int probInterval;
-	int randSeed;
-	int earlyTerm;
-	bool jsDetail;
-};
-
 static const char* optStrings[][3] =
 {
 	{BOOL, "C", "Cplex only (no CBFS)"},
-	{BOOL, "L", "LBContour (default 50)"},
 	{BOOL, "D", "Disable callbacks entirely (default)"},
 	{BOOL, "b", "Use no contours (BFS)"},
 	{BOOL, "w", "Use weighted contour rule (default pw = 1, nw = 1)"},
@@ -64,12 +47,13 @@ static const char* optStrings[][3] =
 	{ARG, "M", "Measure of best: 1 - worst estimate, 2 - worst lower bound, "
 		"3 - best estimate, 4 - best lower bound (default)"},
 	{SEP, "", "" },
-	{ARG, "l", "LB contour number"},
+	{ARG, "L", "LB contour number"},
 	{ARG, "P", "Weight for the positive assignments"},
 	{ARG, "N", "Weight for the null assignments"},
 	{ARG, "j", "JSON output file"},
 	{ARG, "E", "Set iteration for early termination"},
 	{SEP, "", ""},
+	{ARG, "S", "Contour selection option: 1 - Subtree, 2 - WBranch"},
 	{BOOL, "h", "Help"}
 };
 

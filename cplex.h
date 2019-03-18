@@ -25,16 +25,16 @@ typedef multimap<double, CbfsNodeData*> CbfsHeap;
 typedef map<int, CbfsHeap> ContourMap;
 typedef map<int, pair<int,int>> RangeMap;
 typedef list<CbfsNodeData*> CbfsDive;
-struct opts;
+//struct opts;
 
 class CbfsData
 {
 public:
-	CbfsData(Mode m, double posW, double nullW, int mob, int lbPara, int maxDepth, int probInterval, int term) : 
+	CbfsData(Mode m, ContSelMode cm, double posW, double nullW, int mob, int lbPara, int maxDepth, int probInterval, int term) : 
 		mMode(m), mPosW(posW), mNullW(nullW), bestLB(-INFINITY), bestUB(INFINITY), nIters(0),
 		mCurrContour(mContours.begin()), mMob(mob), mLBContPara(lbPara),
 		mDiveMaxDepth(maxDepth), mProbInterval(probInterval),
-		earlyTermIter(term)
+		earlyTermIter(term), mContSelMode(cm)
 	{
 		// WRA Contour Score Matrix Initialization
 		mContScores.resize(lbPara, 0);
@@ -68,14 +68,26 @@ public:
 		//geoMeanShift = 1;
 		// Cont selection
 		mPreDepth = 0;
-		mNumConts = 0;
 		mMinNumContSel = 100;
 		mMaxNumConts = 8;
 		mBiasPara = 1.4;
 		mIsContInitd = false;
-		if (mMode == TreeCont)
+		mIsRepopulate = false;
+		switch (mContSelMode)
+		{
+		case Subtree:
+			mContSelMulti = 1;
+			break;
+		case WBranch:
+			mContSelMulti = 5;
+			break;
+		default:
+			mContSelMulti = 1;
+		}
+		if (mMode == ContSel)
 			turnOffDive();
 	}
+	CbfsData(opts* o);
 	~CbfsData();
 
 	void addNode(CbfsNodeData* nodeData);
@@ -130,13 +142,13 @@ public:
 	void updateOneStep(double value);
 	void updateContScores();
 	void initContScores();
-	void repopulateConts();
+	void populateConts();
 	void resetSubtrees();
 	void setContScores(int contID, double score) { mContScores[contID] = score; }
 	void resetCurPayoff() { mCurPayoff = 0; mCurNumNodesExplrd = 0; }
 	void turnOnDive();
 	void turnOffDive() { mIsCustomDiveOn = false; mDiveStatus = false; mIsCplexDiveOn = false; }
-	int getContNum() { return mNumConts; }
+	int getContNum() { return mContours.size(); }
 
 private:
 	Mode mMode;
@@ -184,10 +196,13 @@ private:
 	bool mIsCplexDiveOn;
 	int preId, prepreId;
 	// VARIABLES: ContourSelection
+	ContSelMode mContSelMode;
+	ContScoreMode mContScoreMode;
+	int mContSelMulti;
 	bool mIsContInitd;
+	bool mIsRepopulate;
 	int mPreDepth;
 	int mMaxNumConts, mNumContVisits, mCurNumNodesExplrd;
-	int mNumConts;
 	int mMinNumContSel;
 	double mBiasPara, mCurPayoff;
 	map<int, int> mContIndexMap;

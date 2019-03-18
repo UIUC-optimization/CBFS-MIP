@@ -19,8 +19,28 @@ using std::string;
 using std::stringstream;
 using std::setprecision;
 
-enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, RandCont, DiveComp, TreeCont };
+enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, RandCont, DiveComp, ContSel };
 enum TieBreak { FIFO, LIFO, OG, ARB };
+enum ContSelMode { Subtree, WBranch };
+enum ContScoreMode { UCB1, SVM };
+
+// options
+struct opts
+{
+	Mode m;
+	ContSelMode cm;
+	double posW, nullW;
+	const char* json_filename;
+	bool disableAdvStart;
+	int timelimit;
+	int mob;
+	int cPara;
+	int maxDepth;
+	int probInterval;
+	int randSeed;
+	int earlyTerm;
+	bool jsDetail;
+};
 
 /*** Constants and Types ***/
 const double Tolerance = 0.000000001;

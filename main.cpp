@@ -25,7 +25,8 @@ int main(int argc, char* argv[])
 				" for writing";
 		}
 
-		CbfsData* cbfs = new CbfsData(options.m, options.posW, options.nullW, options.mob, options.cPara, options.maxDepth, options.probInterval, options.earlyTerm);
+		CbfsData* cbfs = new CbfsData(options.m, options.cm, options.posW, options.nullW, options.mob, options.cPara, options.maxDepth, options.probInterval, options.earlyTerm);
+		//CbfsData* cbfs = new CbfsData(&options);
 		Cplex cplex(infile, jsonFile, cbfs, options.timelimit, options.disableAdvStart, options.randSeed, options.jsDetail);
 		cplex.solve();
 
@@ -40,6 +41,7 @@ int main(int argc, char* argv[])
 const char* parseOpts(int argc, char* argv[], opts& options)
 {
 	options.m = Disable;
+	options.cm = Subtree;
 	options.posW = 1;
 	options.nullW = 1;
 	options.json_filename = nullptr;
@@ -69,6 +71,7 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 	flags[pos] = '\0';
 
 	int opt;
+	int temps;
 	stringstream str; 
 	while ((opt = getopt(argc, argv, flags)) != -1)
 	{
@@ -88,18 +91,50 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 			break;
 		case 'L':
 			options.m = LBContour;
+			options.cPara = atoi(optarg);
 			break;
 		case 'R':
 			options.m = RandCont;
 			break;
 		case 'U':
-			options.m = TreeCont;
+			options.m = ContSel;
+			break;
+		//case 'O':
+		//	int cont = atoi(optarg);
+		//	switch (cont)
+		//	{
+		//	case 1:
+		//		options.m = Weighted;
+		//		break;
+		//	case 2:
+		//		options.m = LBContour;
+		//		break;
+		//	case 3:
+		//		options.m = RandCont;
+		//		break;
+		//	case 4:
+		//		options.m = ContSel;
+		//		break;
+		//	default:
+		//		options.m = Weighted;
+		//	}
+		//	break;
+		case 'S':
+			temps = atoi(optarg);
+			switch (temps)
+			{
+			case 1:
+				options.cm = Subtree;
+				break;
+			case 2:
+				options.cm = WBranch;
+				break;
+			default:
+				options.cm = Subtree;
+			}
 			break;
 		case 'A':
 			options.jsDetail = true;
-			break;
-		case 'l':
-			options.cPara = atoi(optarg);
 			break;
 		case 'd':
 			options.maxDepth = atoi(optarg);
