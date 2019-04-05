@@ -25,7 +25,8 @@ int main(int argc, char* argv[])
 				" for writing";
 		}
 
-		CbfsData* cbfs = new CbfsData(options.m, options.cm, options.posW, options.nullW, options.mob, options.cPara, options.maxDepth, options.probInterval, options.earlyTerm);
+		CbfsData* cbfs = new CbfsData(options.m, options.cm, options.posW, options.nullW, options.mob, 
+			options.cPara, options.maxDepth, options.probInterval, options.earlyTerm, options.numCont, options.UCBconst);
 		//CbfsData* cbfs = new CbfsData(&options);
 		Cplex cplex(infile, jsonFile, cbfs, options.timelimit, options.disableAdvStart, options.randSeed, options.jsDetail);
 		cplex.solve();
@@ -53,6 +54,8 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 	options.probInterval = 0;
 	options.randSeed = 0;
 	options.earlyTerm = 0;
+	options.numCont = 8;
+	options.UCBconst = 1.4;
 	options.jsDetail = false;
 
 	int len = sizeof(optStrings)/(3 * sizeof(char*));
@@ -163,7 +166,12 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 		case 'E':
 			options.earlyTerm = atoi(optarg);
 			break;
-
+		case 'B':
+			options.UCBconst = atof(optarg);
+			break;
+		case 'u':
+			options.numCont = atoi(optarg);
+			break;
 		case 'h':
 			usage(argv[0]);
 			exit(0);

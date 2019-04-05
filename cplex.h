@@ -16,6 +16,8 @@
 #include <utility>
 #include <ilcplex/ilocplex.h>
 #include <ilcplex/ilocplexi.h>
+#include <gmp.h>
+#include <gmpxx.h>
 
 using namespace std;
 
@@ -30,14 +32,15 @@ typedef list<CbfsNodeData*> CbfsDive;
 class CbfsData
 {
 public:
-	CbfsData(Mode m, ContSelMode cm, double posW, double nullW, int mob, int lbPara, int maxDepth, int probInterval, int term) : 
+	CbfsData(Mode m, ContSelMode cm, double posW, double nullW, int mob, int lbPara, int maxDepth, int probInterval, 
+			int term, int numCont, double ucb) : 
 		mMode(m), mPosW(posW), mNullW(nullW), bestLB(-INFINITY), bestUB(INFINITY), nIters(0),
 		mCurrContour(mContours.begin()), mMob(mob), mLBContPara(lbPara),
 		mDiveMaxDepth(maxDepth), mProbInterval(probInterval),
-		earlyTermIter(term), mContSelMode(cm)
+		earlyTermIter(term), mContSelMode(cm), mMaxNumConts(numCont), mBiasPara(ucb)
 	{
 		// WRA Contour Score Matrix Initialization
-		mContScores.resize(lbPara, 0);
+		//mContScores.resize(lbPara, 0);
 		// Tie-breaking Rule Initialization
 		mTieBreak = OG;
 		// Dive Initialization
@@ -69,8 +72,8 @@ public:
 		// Cont selection
 		mPreDepth = 0;
 		mMinNumContSel = 100;
-		mMaxNumConts = 8;
-		mBiasPara = 1.4;
+		//mMaxNumConts = 8;
+		//mBiasPara = 1.4;
 		mIsContInitd = false;
 		mIsRepopulate = false;
 		switch (mContSelMode)
@@ -79,7 +82,7 @@ public:
 			mContSelMulti = 1;
 			break;
 		case WBranch:
-			mContSelMulti = 5;
+			mContSelMulti = 1;
 			break;
 		default:
 			mContSelMulti = 1;
@@ -144,8 +147,10 @@ public:
 	void initContScores();
 	void populateConts();
 	void resetSubtrees();
+	void setContScoresMP(int contID, mpf_class score) { mContScoresMP[contID] = score; }
 	void setContScores(int contID, double score) { mContScores[contID] = score; }
 	void resetCurPayoff() { mCurPayoff = 0; mCurNumNodesExplrd = 0; }
+	void resetCurPayoffMP() { mCurPayoffMP = 0; mCurNumNodesExplrd = 0; }
 	void turnOnDive();
 	void turnOffDive() { mIsCustomDiveOn = false; mDiveStatus = false; mIsCplexDiveOn = false; }
 	int getContNum() { return mContours.size(); }
@@ -209,6 +214,9 @@ private:
 	vector<double> mContScores;
 	vector<double> mContPayoffs;
 	vector<int> mContVisits;
+	vector<mpf_class> mContScoresMP;
+	vector<mpf_class> mContPayoffsMP;
+	mpf_class mCurPayoffMP;
 
 	IloNumVarArray mAllVars, mAllIntVars;
 

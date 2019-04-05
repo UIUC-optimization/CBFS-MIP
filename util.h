@@ -39,6 +39,8 @@ struct opts
 	int probInterval;
 	int randSeed;
 	int earlyTerm;
+	int numCont;
+	double UCBconst;
 	bool jsDetail;
 };
 

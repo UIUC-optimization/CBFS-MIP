@@ -253,7 +253,7 @@ CbfsData::CbfsData(opts* o)
 	mEarlyTermOn = (earlyTermIter > 0) ? true : false;				// Check if early termination is on based on iteration number
 	//geoMeanShift = 1;
 	// Contour Selection Initialization
-	mContScores.resize(1, 0);										// WRA Contour Score Matrix Initialization
+	//mContScores.resize(1, 0);										// WRA Contour Score Matrix Initialization
 	mPreDepth = 0;
 	mMinNumContSel = 100;
 	mMaxNumConts = 8;
@@ -267,7 +267,7 @@ CbfsData::CbfsData(opts* o)
 		mContSelMulti = 1;
 		break;
 	case WBranch:
-		mContSelMulti = 5;
+		mContSelMulti = 1;
 		break;
 	default:
 		mContSelMulti = 1;
@@ -532,11 +532,11 @@ NID CbfsData::getNextNode()
 			mDiveCand.clear();
 
 			if (mCurDiveCount >= mDiveMaxDepth) mDiveStatus = false;		// If maximal depth of a dive is reached, terminate current dive
-			else if (mCurDiveCount >= mDiveMinDepth && bestUB != INFINITY)
-			{
+			//else if (mCurDiveCount >= mDiveMinDepth && bestUB != INFINITY)
+			//{
 				// If current LB too close to global UB, terminate current dive
-				if ((diveNode->lpval - bestLB) / (bestUB - bestLB) > mDiveTol) mDiveStatus = false;
-			}
+				//if ((diveNode->lpval - bestLB) / (bestUB - bestLB) > mDiveTol) mDiveStatus = false;
+			//}
 			return id;
 		}
 		// Hhandle empty successor list mid-probing
@@ -715,20 +715,30 @@ ContourMap::iterator CbfsData::getNextCont()
 				updateCurContPayoff();
 				updateContScores();
 			}
-			selectedCont = mContours.begin();
-			double maxScore = mContScores[mContIndexMap[selectedCont->first]];
 			vector<int> candidates;
+			selectedCont = mContours.begin();
+			// double maxScore = mContScores[mContIndexMap[selectedCont->first]];	
+			// for (auto iter = mContours.begin(); iter != mContours.end(); iter++)
+			// {
+			// 	if (mContScores[mContIndexMap[iter->first]] > maxScore)
+			// 	{
+			// 		maxScore = mContScores[mContIndexMap[iter->first]];
+			// 		selectedCont = iter;
+			// 	}
+			// }
+			mpf_class maxScore = mContScoresMP[mContIndexMap[selectedCont->first]];
 			for (auto iter = mContours.begin(); iter != mContours.end(); iter++)
 			{
-				if (mContScores[mContIndexMap[iter->first]] > maxScore)
+				if (mContScoresMP[mContIndexMap[iter->first]] > maxScore)
 				{
-					maxScore = mContScores[mContIndexMap[iter->first]];
+					maxScore = mContScoresMP[mContIndexMap[iter->first]];
 					selectedCont = iter;
 				}
 			}
 			mNumContVisits++;
 			mContVisits[mContIndexMap[selectedCont->first]]++;
-			resetCurPayoff();
+			//resetCurPayoff();
+			resetCurPayoffMP();
 			//printScores();
 			//if (mJsonFile)
 			//{
@@ -889,8 +899,11 @@ void CbfsData::updateCurContPayoff()
 		int visits = mContVisits[curCont];									// number of visits to current contour
 
 		if (mCurNumNodesExplrd != 0)
-			mContPayoffs[curCont] = (mContPayoffs[curCont] * (visits - 1) + mCurPayoff) / visits;
+		{
+			//mContPayoffs[curCont] = (mContPayoffs[curCont] * (visits - 1) + mCurPayoff) / visits;
 			//mContPayoffs[curCont] = mContPayoffs[curCont] * ((visits - 1) / double(visits)) + mCurPayoff / visits;
+			mContPayoffsMP[curCont] = (mContPayoffsMP[curCont] * (visits - 1) + mCurPayoffMP) / visits;
+		}
 	}
 }
 
@@ -899,12 +912,20 @@ void CbfsData::updateContScores()
 {
 	if (mMode == ContSel)
 	{
-		for (int i = 0; i < mContPayoffs.size(); i++)
+		// for (int i = 0; i < mContPayoffs.size(); i++)
+		// {
+		// 	if (mContVisits[i] == 0)
+		// 		mContScores[i] = mContPayoffs[i];
+		// 	else if (mContVisits[i] != -1)
+		// 		mContScores[i] = mContPayoffs[i]
+		// 				+ mBiasPara * sqrt(log(mNumContVisits) / mContVisits[i]);
+		// }
+		for (int i = 0; i < mContPayoffsMP.size(); i++)
 		{
 			if (mContVisits[i] == 0)
-				mContScores[i] = mContPayoffs[i];
+				mContScoresMP[i] = mContPayoffsMP[i];
 			else if (mContVisits[i] != -1)
-				mContScores[i] = mContPayoffs[i]
+				mContScoresMP[i] = mContPayoffsMP[i]
 						+ mBiasPara * sqrt(log(mNumContVisits) / mContVisits[i]);
 		}
 	}
@@ -917,20 +938,26 @@ void CbfsData::initContScores()
 	int numConts = mContours.size();
 	int id = 0;
 	double value;
+	mpf_class valueMP;
 	int count;
-	mContScores.clear(); mContScores.resize(numConts);
+	//mContScores.clear(); mContScores.resize(numConts);
 	mContVisits.clear(); mContVisits.resize(numConts, 0);
-	mContPayoffs.clear(); mContPayoffs.resize(numConts);
+	//mContPayoffs.clear(); mContPayoffs.resize(numConts);
+	mContScoresMP.clear(); mContScoresMP.resize(numConts);
+	mContPayoffsMP.clear(); mContPayoffsMP.resize(numConts);
+	mContIndexMap.clear();
 	for (auto iter = mContours.begin(); iter != mContours.end(); iter++, id++)
 	{
 		mContIndexMap[iter->first] = id;
 		count = 0;
 		for (auto nodeIter = iter->second.begin(); nodeIter != iter->second.end(); nodeIter++, count++)
 		{
-			value = (rootLB + Tolerance) / (nodeIter->first + Tolerance);
-			mContPayoffs[id] = (mContPayoffs[id] * count + value) / (count + 1);
+			valueMP = (rootLB + Tolerance) / (nodeIter->first + Tolerance);
+			//mContPayoffs[id] = (mContPayoffs[id] * count + value) / (count + 1);
+			mContPayoffsMP[id] = (mContPayoffsMP[id] * count + valueMP) / (count + 1);
 		}
-		mContScores[id] = mContPayoffs[id];
+		//mContScores[id] = mContPayoffs[id];
+		mContScoresMP[id] = mContPayoffsMP[id];
 	}
 	mCurPayoff = 0;
 	mNumContVisits = 0;
@@ -947,6 +974,8 @@ void CbfsData::populateConts()
 	vector<CbfsNodeData*> allNodes;
 	vector<int> allNodesWBScores;
 	set<int> wbscores;
+	ContourMap tempMap;
+	CbfsNodeData* nodeData;
 	for (auto c = mContours.begin(); c != mContours.end(); c++)
 	{
 		for (auto n = c->second.begin(); n != c->second.end(); n++)
@@ -961,52 +990,52 @@ void CbfsData::populateConts()
 	sort(allNodes.begin(), allNodes.end(), weiContComp);
 	int numInCurCont = allNodes.size();
 	int wbNumInCurCont = wbscores.size();
-	int wbNumInGroup = wbNumInCurCont / mMaxNumConts;
-	int extra = wbNumInGroup % mMaxNumConts;
-	int offset;
-	int diffWBCount;
-	int id = 0;
-	ContourMap tempMap;
-	CbfsNodeData* nodeData;
-	// All nodes with the same weighted branch score in the same
-	// contour even if no. of nodes in each contour is different.
-	int maxNumConts = min(mMaxNumConts, wbNumInCurCont);
-	for (int i = 0; i < maxNumConts; i++)
-	{
-		offset = (extra > 0) ? 1 : 0;
-		extra--;
-		// diffWBCount records value changes in the sorted vector of nodes
-		diffWBCount = 1;
-		while (diffWBCount <= wbNumInGroup + offset)
-		{
-			allNodes[id]->contour = i;
-			id++;
-			if (id >= numInCurCont) break;
-			if (allNodes[id]->weiContour != allNodes[id - 1]->weiContour)
-				diffWBCount++;
-		}
-	}
-	// Partition the nodes into at most mMaxNumConts number of contours 
-	//int numInNewCont = numInCurCont / mMaxNumConts;
-	//int extra = numInCurCont % mMaxNumConts;
-	//int pre = 0;
+	// Partition the nodes into at most mMaxNumConts number of contours
+	// All nodes with the same weighted branch score in the same contour
+	//int maxNumConts = min(mMaxNumConts, wbNumInCurCont);
+	//int wbNumInGroup = wbNumInCurCont / maxNumConts;
+	//int extra = wbNumInCurCont % maxNumConts;
 	//int offset;
-	//if (numInNewCont == 0)
+	//int diffWBCount;
+	//int id = 0;
+	//for (int i = 0; i < maxNumConts; i++)
 	//{
-	//	for (int i = 0; i < numInCurCont; i++)
-	//		allNodes[i]->contour = i;
-	//}
-	//else
-	//{
-	//	for (int i = 0; i < mMaxNumConts; i++)
+	//	offset = (extra > 0) ? 1 : 0;
+	//	extra--;
+	//	// diffWBCount records value changes in the sorted vector of nodes
+	//	diffWBCount = 1;
+	//	while (diffWBCount <= wbNumInGroup + offset)
 	//	{
-	//		offset = (extra > 0) ? 1 : 0;
-	//		extra--;
-	//		for (int j = 0; j < numInNewCont + offset; j++)
-	//			allNodes[j + pre]->contour = i;
-	//		pre += numInNewCont + offset;
+	//		allNodes[id]->contour = i;
+	//		id++;
+	//		if (id >= numInCurCont) break;
+	//		if (allNodes[id]->weiContour != allNodes[id - 1]->weiContour)
+	//			diffWBCount++;
 	//	}
 	//}
+	// Partition the nodes into at most mMaxNumConts number of contours
+	int maxNumConts = min(mMaxNumConts, numInCurCont);
+	int numInNewCont = numInCurCont / maxNumConts;
+	int extra = numInCurCont % maxNumConts;
+	int pre = 0;
+	int offset;
+	if (numInNewCont == 0)
+	{
+		for (int i = 0; i < numInCurCont; i++)
+			allNodes[i]->contour = i;
+	}
+	else
+	{
+		for (int i = 0; i < mMaxNumConts; i++)
+		{
+			offset = (extra > 0) ? 1 : 0;
+			extra--;
+			for (int j = 0; j < numInNewCont + offset; j++)
+				allNodes[j + pre]->contour = i;
+			pre += numInNewCont + offset;
+		}
+	}
+
 	// insert nodes into contours
 	double best;
 	for (int j = 0; j < allNodes.size(); j++)
@@ -1044,10 +1073,12 @@ void CbfsData::updateOneStep(double value)
 {
 	if (mMode == ContSel && mIsContInitd)
 	{
-		value = (rootLB + Tolerance) / (value + Tolerance);
-		mCurPayoff = (mCurPayoff * mCurNumNodesExplrd + value) / (mCurNumNodesExplrd + 1);
+		mpf_class curPayoff = value;
+		curPayoff = (rootLB + Tolerance) / (curPayoff + Tolerance);
+		//mCurPayoff = (mCurPayoff * mCurNumNodesExplrd + value) / (mCurNumNodesExplrd + 1);
 		//mCurPayoff = mCurPayoff * (double(mCurNumNodesExplrd) / (mCurNumNodesExplrd + 1))
 		//	+ value / (mCurNumNodesExplrd + 1);
+		mCurPayoffMP = (mCurPayoffMP * mCurNumNodesExplrd + curPayoff) / (mCurNumNodesExplrd + 1);
 		mCurNumNodesExplrd++;
 	}
 }

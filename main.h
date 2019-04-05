@@ -38,7 +38,7 @@ static const char* optStrings[][3] =
 	{BOOL, "W", "Disable warm starts and cut generation"},
 	{BOOL, "R", "Use random contour"},
 	{BOOL, "A", "JSON output details of iterations"},
-	{BOOL, "U", "Contour selection strategy using UCB"},
+	{BOOL, "U", "Contour selection strategy"},
 	{SEP, "", "" },
 	{ARG, "d", "Use diving heuristic, set maximum diving depth"},
 	{ARG, "p", "Take probing step during diving, set probing interval"},
@@ -54,6 +54,8 @@ static const char* optStrings[][3] =
 	{ARG, "E", "Set iteration for early termination"},
 	{SEP, "", ""},
 	{ARG, "S", "Contour selection option: 1 - Subtree, 2 - WBranch"},
+	{ARG, "B", "UCB constant value."},
+	{ARG, "u", "Contour selection strategy number of contours"},
 	{BOOL, "h", "Help"}
 };
 
