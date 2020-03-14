@@ -1,4 +1,4 @@
-// main.cpp: David R. Morrison
+// main.cpp: Wenda Zhang
 // Entry point 
 
 #include "main.h"
@@ -6,8 +6,7 @@
 
 #include <cstdio>
 #include <cstdlib>
-// Removed for Windows compatibility (also not currently being used)
-//#include <unistd.h>
+
 
 using namespace std;
 
@@ -26,8 +25,10 @@ int main(int argc, char* argv[])
 				" for writing";
 		}
 
-		CbfsData* cbfs = new CbfsData(options.m, options.posW, options.nullW, options.mob, options.cPara, options.maxDepth, options.probInterval);
-		Cplex cplex(infile, jsonFile, cbfs, options.timelimit, options.disableAdvStart, options.randSeed);
+		CbfsData* cbfs = new CbfsData(options.m, options.cm, options.posW, options.nullW, options.mob, 
+			options.cPara, options.maxDepth, options.probInterval, options.earlyTerm, options.numCont, options.UCBconst);
+		//CbfsData* cbfs = new CbfsData(&options);
+		Cplex cplex(infile, jsonFile, cbfs, options.timelimit, options.disableAdvStart, options.randSeed, options.jsDetail);
 		cplex.solve();
 
 		if (jsonFile)
@@ -41,6 +42,7 @@ int main(int argc, char* argv[])
 const char* parseOpts(int argc, char* argv[], opts& options)
 {
 	options.m = Disable;
+	options.cm = Subtree;
 	options.posW = 1;
 	options.nullW = 1;
 	options.json_filename = nullptr;
@@ -48,9 +50,13 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 	options.timelimit = 3600;
 	options.mob = 3;
 	options.cPara = 50;
-	options.maxDepth = -1;
-	options.probInterval = -1;
+	options.maxDepth = 0;
+	options.probInterval = 0;
 	options.randSeed = 0;
+	options.earlyTerm = 0;
+	options.numCont = 8;
+	options.UCBconst = 1.4;
+	options.jsDetail = false;
 
 	int len = sizeof(optStrings)/(3 * sizeof(char*));
 	int numOpts = 0;
@@ -68,6 +74,7 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 	flags[pos] = '\0';
 
 	int opt;
+	int temps;
 	stringstream str; 
 	while ((opt = getopt(argc, argv, flags)) != -1)
 	{
@@ -87,15 +94,50 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 			break;
 		case 'L':
 			options.m = LBContour;
+			options.cPara = atoi(optarg);
 			break;
 		case 'R':
 			options.m = RandCont;
 			break;
-		case 'l':
-			options.cPara = atoi(optarg);
+		case 'U':
+			options.m = ContSel;
 			break;
-		case 'n':
-			options.m = NInfCont;
+		//case 'O':
+		//	int cont = atoi(optarg);
+		//	switch (cont)
+		//	{
+		//	case 1:
+		//		options.m = Weighted;
+		//		break;
+		//	case 2:
+		//		options.m = LBContour;
+		//		break;
+		//	case 3:
+		//		options.m = RandCont;
+		//		break;
+		//	case 4:
+		//		options.m = ContSel;
+		//		break;
+		//	default:
+		//		options.m = Weighted;
+		//	}
+		//	break;
+		case 'S':
+			temps = atoi(optarg);
+			switch (temps)
+			{
+			case 1:
+				options.cm = Subtree;
+				break;
+			case 2:
+				options.cm = WBranch;
+				break;
+			default:
+				options.cm = Subtree;
+			}
+			break;
+		case 'A':
+			options.jsDetail = true;
 			break;
 		case 'd':
 			options.maxDepth = atoi(optarg);
@@ -121,7 +163,15 @@ const char* parseOpts(int argc, char* argv[], opts& options)
 		case 'j':
 			options.json_filename = optarg;
 			break;
-
+		case 'E':
+			options.earlyTerm = atoi(optarg);
+			break;
+		case 'B':
+			options.UCBconst = atof(optarg);
+			break;
+		case 'u':
+			options.numCont = atoi(optarg);
+			break;
 		case 'h':
 			usage(argv[0]);
 			exit(0);

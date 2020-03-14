@@ -1,10 +1,11 @@
-// util.h: David R. Morrison, Mar. 2011
+// util.h: Wenda Zhang, modified from David R. Morrison
 // Utility functions
 
 #ifndef UTIL_H
 #define UTIL_H
 
 #include <vector>
+#include <set>
 #include <algorithm>
 #include <math.h>
 #include <exception>
@@ -18,7 +19,30 @@ using std::string;
 using std::stringstream;
 using std::setprecision;
 
-enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, NInfCont, RandCont };
+enum Mode { Disable = -1, CplexOnly, Weighted, LBContour, RandCont, DiveComp, ContSel };
+enum TieBreak { FIFO, LIFO, OG, ARB };
+enum ContSelMode { Subtree, WBranch };
+enum ContScoreMode { UCB1, SVM };
+
+// options
+struct opts
+{
+	Mode m;
+	ContSelMode cm;
+	double posW, nullW;
+	const char* json_filename;
+	bool disableAdvStart;
+	int timelimit;
+	int mob;
+	int cPara;
+	int maxDepth;
+	int probInterval;
+	int randSeed;
+	int earlyTerm;
+	int numCont;
+	double UCBconst;
+	bool jsDetail;
+};
 
 /*** Constants and Types ***/
 const double Tolerance = 0.000000001;
