@@ -89,6 +89,9 @@ public:
 		}
 		if (mMode == ContSel)
 			turnOffDive();
+
+		mRexSolCountOn = true;
+		checkAgainst = 31.87;
 	}
 	CbfsData(opts* o);
 	~CbfsData();
@@ -155,6 +158,11 @@ public:
 	void turnOffDive() { mIsCustomDiveOn = false; mDiveStatus = false; mIsCplexDiveOn = false; }
 	int getContNum() { return mContours.size(); }
 
+	void updateNodeCount();
+	int getNumLNode() { return mNumLNode; }
+	int getNumENode() { return mNumENode; }
+	int getNumGNode() { return mNumGNode; }
+
 private:
 	Mode mMode;
 	TieBreak mTieBreak;
@@ -217,6 +225,11 @@ private:
 	vector<mpf_class> mContScoresMP;
 	vector<mpf_class> mContPayoffsMP;
 	mpf_class mCurPayoffMP;
+
+	bool mRexSolCountOn;
+	map<double, int> mRexSolCount;
+	int mNumLNode, mNumENode, mNumGNode;
+	double checkAgainst;
 
 	IloNumVarArray mAllVars, mAllIntVars;
 

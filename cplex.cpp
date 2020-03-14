@@ -26,6 +26,7 @@ Cplex::Cplex(const char* filename, FILE* jsonFile, CbfsData* cbfs, int timelimit
 	mCplex.setParam(IloCplex::Threads, 1);			// Limit to 1 thread for all versions
 	mCplex.setParam(IloCplex::TiLim, timelimit);	// 1 hour time limit
 	mCplex.setParam(IloCplex::NodeFileInd, 0);		// Callbacks won't work with compressed node files
+//	mCplex.setParam(IloCplex::TreLim, 6000);		// Limit memory usage to 6G
 //	mCplex.setParam(IloCplex::NodeSel, 2);          // A best estimate node selection strategy
 //	mCplex.setParam(IloCplex::BBInterval, 0);       // Never select best bound when using best estimate strategy
 //	mCplex.setParam(IloCplex::VarSel, -1);			// Use the ''maximum infeasibility'' rule for variable selection
@@ -79,6 +80,10 @@ void Cplex::solve()
 	double elpToRoot = (mCbfs->getRootTime()).tv_sec - start.tv_sec;
 	elpToRoot += ((mCbfs->getRootTime()).tv_nsec - start.tv_nsec) / 1000000000.0;
 	int numCont = mCbfs->getContNum();
+	mCbfs->updateNodeCount();
+	int numLNode = mCbfs->getNumLNode();
+	int numENode = mCbfs->getNumENode();
+	int numGNode = mCbfs->getNumGNode();
 
 	printf("DATA_START\n{\n");
 
@@ -137,6 +142,7 @@ void Cplex::solve()
 			catch (const IloCplex::Exception& e) { fprintf(mJsonFile, "inf, "); }
 			fprintf(mJsonFile, "\"total_nodes\": %ld, \"end_time\": %0.2f, \"num_vars\": %d, ", mCplex.getNnodes(), elapsed, mCplex.getNintVars());
 			fprintf(mJsonFile, "\"root_time\": %0.2f, ", elpToRoot);
+			fprintf(mJsonFile, "\"LNode\": %d, \"ENode\": %d, \"GNode\": %d, ", numLNode, numENode, numGNode);
 			fprintf(mJsonFile, "\"cont_rem\": %d}\n", numCont);
 		}
 		else
@@ -290,6 +296,14 @@ void CbfsData::addNode(CbfsNodeData* nodeData)
 	// Store the recently added nodes
 	if (mEarlyTermOn)
 		rcntAddedNodes.push_back(nodeData);
+
+	if (mRexSolCountOn)
+	{
+		if (mRexSolCount.count(nodeData->lpval)==0)
+			mRexSolCount[nodeData->lpval] = 1;
+		else
+			mRexSolCount[nodeData->lpval]++;
+	}
 
 	// 1,2: Best Estimate/LB; 3,4: Worst Estimate/LB; 5: hybrid between Best Estimate and LB
 	double best;
@@ -898,7 +912,7 @@ void CbfsData::updateCurContPayoff()
 		int curCont = mContIndexMap[mCurrContour->first];					// id of current contour
 		int visits = mContVisits[curCont];									// number of visits to current contour
 
-		if (mCurNumNodesExplrd != 0)
+		if (mCurNumNodesExplrd != 0 && visits != 0)
 		{
 			//mContPayoffs[curCont] = (mContPayoffs[curCont] * (visits - 1) + mCurPayoff) / visits;
 			//mContPayoffs[curCont] = mContPayoffs[curCont] * ((visits - 1) / double(visits)) + mCurPayoff / visits;
@@ -1142,6 +1156,23 @@ void CbfsData::updateBounds(double lb, double ub, double gap)
 void CbfsData::updateExpdMaxDepth(int depth)
 {
 	mExpdMaxDepth = (depth > mExpdMaxDepth) ? depth : mExpdMaxDepth;
+}
+
+void CbfsData::updateNodeCount()
+{
+	mNumLNode = 0; mNumENode = 0; mNumGNode = 0;
+	if (mRexSolCountOn == false) return;
+	checkAgainst = 211913;
+	double tol = (checkAgainst * 0.000001 < 0.000001) ? 0.000001 : checkAgainst * 0.000001;
+	for (auto iter = mRexSolCount.begin(); iter != mRexSolCount.end(); iter++)
+	{
+		if (iter->first < checkAgainst - tol)
+			mNumLNode += iter->second;
+		else if (iter->first > checkAgainst + tol)
+			mNumGNode += iter->second;
+		else
+			mNumENode += iter->second;
+	}
 }
 /*----------------------------------------------------*/
 
